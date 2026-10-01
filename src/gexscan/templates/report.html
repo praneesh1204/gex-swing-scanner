@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gexscan {{ run_date }}</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#666; --line:#e4e4e4; --card:#f7f7f8; --good:#0a7d3b; --warn:#b26b00; --bad:#b3261e; --accent:#2457d6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121314; --fg:#ececec; --muted:#9a9a9a; --line:#2b2d30; --card:#1b1c1f; --good:#4cc38a; --warn:#e0a13c; --bad:#ef6b62; --accent:#7ea2ff; } }
+  body { background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system, Segoe UI, Roboto, sans-serif; margin:0; padding:24px 16px; }
+  main { max-width:1150px; margin:0 auto; }
+  h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:18px; margin:30px 0 8px; } h3 { margin:0 0 6px; font-size:16px; }
+  a { color:var(--accent); }
+  .muted { color:var(--muted); font-size:13px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .scroll { overflow-x:auto; }
+  ul { margin:4px 0 0 18px; padding:0; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:13px; }
+  .exit { border-left:3px solid var(--accent); padding:6px 10px; margin:8px 0; background:var(--bg); border-radius:4px; font-size:13px; }
+  .banner { border:1px solid var(--warn); color:var(--warn); padding:10px 14px; border-radius:8px; margin:10px 0; }
+  details { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin:8px 0; }
+  summary { cursor:pointer; font-weight:600; }
+  .grid3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; margin-top:8px; }
+  img.chart { max-width:100%; }
+  .disc { border-top:1px solid var(--line); margin-top:30px; padding-top:10px; }
+</style>
+</head>
+<body><main>
+<h1>gexscan · {{ run_date }}</h1>
+<div class="muted">Run {{ run_ts }} local · chains: CBOE delayed (~15 min, OI prior-day, timestamps UTC) · prices: yfinance · news: Google News RSS / optional keys{% if fa_used %} · FlashAlpha cross-check{% endif %}</div>
+<div class="muted"><b>{{ disclaimer }}</b></div>
+
+{% for n in risk_notes %}<div class="banner">{{ n }}</div>{% endfor %}
+
+<h2>1 · Review of open ideas{% if review_date %} <span class="muted">(latest from {{ review_date }})</span>{% endif %}</h2>
+{% if reviews %}
+<div class="scroll"><table>
+<tr><th>#</th><th>Ticker</th><th>Idea</th><th>Spot then → now</th><th>Mark</th><th>P/L (est.)</th><th>Setup check</th><th>Action</th></tr>
+{% for r in reviews %}
+<tr>
+  <td>{{ r.id }}{% if r.taken %} <span class="pill">taken</span>{% endif %}</td>
+  <td><b>{{ r.symbol }}</b><br><span class="muted">{{ r.setup|replace('_',' ') }} · {{ r.run_date }}</span></td>
+  <td>{{ r.summary }}<br><span class="muted">TP {{ '%.2f'|format(r.plan.tp) if r.plan.tp is not none else '–' }}{% if r.plan.stop %} · stop {{ '%.2f'|format(r.plan.stop) }}{% endif %}{% if r.plan.below %} · close below {{ r.plan.below }}{% endif %}{% if r.plan.above %} · close above {{ r.plan.above }}{% endif %} · time {{ r.plan.time_exit }}</span></td>
+  <td>{{ '%.2f'|format(r.prev_spot) if r.prev_spot else '–' }} → {{ '%.2f'|format(r.spot) if r.spot else '–' }}{% if r.chg_pct is not none %} ({{ '%+.1f'|format(r.chg_pct) }}%){% endif %}</td>
+  <td>{{ '%.2f'|format(r.mark) if r.mark is not none else '–' }}</td>
+  <td class="{{ 'good' if (r.pnl or 0) > 0 else ('bad' if (r.pnl or 0) < 0 else '') }}">{{ '$%+.0f'|format(r.pnl) if r.pnl is not none else '–' }}{% if r.pnl_pct is not none %}<br><span class="muted">{{ '%+.0f'|format(r.pnl_pct) }}% of risk</span>{% endif %}</td>
+  <td class="{{ 'good' if r.label=='setup intact' else ('warn' if r.label=='watch/reversal' else 'bad') }}"><b>{{ r.label }}</b>{% for t in r.triggers %}<br><span class="muted">{{ t }}</span>{% endfor %}</td>
+  <td class="{{ 'bad' if r.status=='stop' else ('good' if r.status=='tp' else '') }}"><b>{{ r.action }}</b>{% if r.exit_reason %}<br><span class="muted">{{ r.exit_reason }}</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</table></div>
+<p class="muted">Marks use delayed mid prices, so treat P/L as an estimate; your fills will differ.</p>
+{% else %}<p class="muted">No open ideas from earlier runs.</p>{% endif %}
+
+{% if stats.n %}<p class="muted">Last 7 days: {{ stats.n }} closed · {{ stats.wins }} wins ({{ stats.win_rate|int }}%) · P/L ${{ '%+.0f'|format(stats.total_pnl) }} (paper, est.){% if stats_all.n %} · all-time {{ stats_all.n }} closed, ${{ '%+.0f'|format(stats_all.total_pnl) }}{% endif %}</p>{% endif %}
+
+<h2>2 · Trade ideas for today</h2>
+{% if top %}
+<div class="cards">
+{% for item in top %}{% set t = item.trade %}{% set s = item.score %}{% set l = item.levels %}
+<div class="card">
+  <h3>#{{ loop.index }} {{ t.symbol }} · {{ t.setup|replace('_',' ') }}{% if s.total is not none %} <span class="pill">score {{ s.total }}</span>{% endif %}</h3>
+  <div class="kv">
+    <span class="muted">Legs</span><span>{% for g in t.legs %}{{ g.action }} {{ t.expiry }} {{ '%g'|format(g.strike) }}{{ g.type }} <span class="muted">({{ '%.2f'|format(g.bid) }}/{{ '%.2f'|format(g.ask) }}, Δ{{ '%.2f'|format(g.delta) }}, OI {{ g.oi|int }})</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</span>
+    <span class="muted">{{ 'Credit' if t.net_mid > 0 else 'Debit' }}</span><span>{{ '%.2f'|format(t.net_mid|abs) }} mid · {{ '%.2f'|format(t.net_natural|abs) }} natural · {{ t.dte }} DTE</span>
+    <span class="muted">Max P / L</span><span>${{ t.max_profit|int }} / ${{ t.max_loss|int }} per contract · suggested size {{ t.contracts }}</span>
+    <span class="muted">Breakeven</span><span>{{ t.breakevens|join(', ') or '–' }}{% if t.pop_est %} · POP≈{{ (t.pop_est*100)|round|int }}%{% endif %}{% if t.p_touch_short %} · P(touch short)≈{{ (t.p_touch_short*100)|round|int }}%{% endif %} <span class="muted">(estimates)</span></span>
+    <span class="muted">Status</span><span>{{ item.status }}</span>
+  </div>
+  <div class="exit">
+    <b>Exit plan</b><br>
+    ✅ {{ t.take_profit }}<br>
+    🛑 {{ t.stop }}<br>
+    ⏱ {{ t.time_stop }}
+  </div>
+  <ul>{% for r in s.reasons %}<li>{{ r }}</li>{% endfor %}{% for w in s.warnings %}<li class="warn">{{ w }}</li>{% endfor %}{% for n in t.notes %}<li class="warn">{{ n }}</li>{% endfor %}</ul>
+  {% if item.news and item.news.summary %}<p class="muted"><b>News</b> ({{ item.news.summary_source }}): {{ item.news.summary }}</p>{% endif %}
+  {% for a in t.alternatives %}
+  <div class="exit"><b>Alternative (wheel):</b> {{ a.summary }} · cash ${{ '{:,}'.format(a.cash_required) }} · {{ a.yield_pct }}% ({{ a.annualised_pct }}% ann.)<br>
+  ✅ {{ a.take_profit }} · 🛑 {{ a.stop }} · ⏱ close {{ a.time_exit }}<br><span class="muted">{{ a.note }}</span></div>
+  {% endfor %}
+</div>
+{% endfor %}
+</div>
+{% else %}<p>No idea passed the rules today. Sitting out is a position.</p>{% endif %}
+
+{% if watch %}
+<h3 style="margin-top:16px">Watch only</h3>
+<ul>{% for w in watch %}<li><b>{{ w.symbol }}</b> {{ w.trade.setup|replace('_',' ') }}: {% for g in w.trade.legs %}{{ g.action }} {{ '%g'|format(g.strike) }}{{ g.type }} {% endfor %}{{ w.trade.expiry }} <span class="muted">({{ w.status }})</span></li>{% endfor %}</ul>
+{% endif %}
+
+<h2>3 · Scoreboard</h2>
+<div class="scroll"><table>
+<tr><th>Ticker</th><th>Spot</th><th>Setup</th><th>Score</th><th>Net GEX ($/1%)</th><th>Put wall</th><th>Call wall</th><th>Flip</th><th>Exp. move (near)</th><th>IV / RV20</th><th>IV rank</th><th>Trend</th><th>Value area</th><th>Opt. flow</th><th>News</th><th>Earnings</th><th>Status</th></tr>
+{% for r in rows %}
+<tr>
+  <td><b><a href="#d-{{ r.symbol }}">{{ r.symbol }}</a></b></td>
+  <td>{{ '%.2f'|format(r.spot) if r.spot else '–' }}</td>
+  <td>{{ r.setup }}</td><td>{{ r.score }}</td>
+  <td class="{{ 'good' if (r.net_gex or 0) > 0 else 'bad' }}">{{ '%.1fM'|format((r.net_gex or 0)/1e6) }}</td>
+  <td>{{ r.put_wall_txt }}</td><td>{{ r.call_wall_txt }}</td><td>{{ r.flip_txt }}</td>
+  <td>{{ r.em_txt }}</td><td>{{ r.ivrv_txt }}</td><td>{{ r.iv_rank|round|int if r.iv_rank is not none else '–' }}</td>
+  <td>{{ r.trend or '–' }} {{ r.trend_txt }}</td><td>{{ r.vp_location or '–' }}</td>
+  <td>{{ r.flow_bias or '–' }}{% if r.pc_volume %} <span class="muted">P/C {{ '%.2f'|format(r.pc_volume) }}</span>{% endif %}</td>
+  <td class="{{ 'bad' if r.news_flags else '' }}">{{ r.news_sentiment or '–' }}{% if r.news_flags %}<br><span class="muted">{{ r.news_flags }}</span>{% endif %}</td>
+  <td>{{ r.earnings or 'unknown' }}</td>
+  <td class="{{ 'good' if r.status=='TRADE' else 'muted' }}">{{ r.status }}</td>
+</tr>
+{% endfor %}
+</table></div>
+
+<h2>4 · Ticker detail</h2>
+{% for d in details %}{% set l = d.levels %}{% set t = d.tech %}{% set v = d.vol %}{% set p = d.vp %}{% set f = d.flow %}{% set n = d.news %}
+<details id="d-{{ d.symbol }}">
+<summary>{{ d.symbol }} {% if l %}· {{ '%.2f'|format(l.spot) }} · {{ l.regime|replace('_',' ') }}{% endif %} · {{ d.status }}</summary>
+{% if not l %}<p class="muted">{{ d.errors|join('; ') }}</p>{% else %}
+<div class="muted">Freshness: {% for k, val in d.fresh.items() %}<b>{{ k }}</b> {{ val }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+<div class="grid3">
+  <div><b>Dealer gamma (GEX)</b><div class="kv">
+    <span class="muted">Net GEX</span><span>{{ '%.1fM'|format(l.net_gex/1e6) }} $/1%</span>
+    <span class="muted">Call / put wall</span><span>{{ l.call_wall }} / {{ l.put_wall }}</span>
+    <span class="muted">Gamma flip</span><span>{{ '%.2f'|format(l.gamma_flip) if l.gamma_flip else l.flip_status }}{% if l.flip_roots|length > 1 %} <span class="muted">(roots {{ l.flip_roots|map('round',2)|join(', ') }})</span>{% endif %}</span>
+    <span class="muted">Max +γ / −γ strike</span><span>{{ l.max_pos_gamma_strike }} / {{ l.max_neg_gamma_strike }}</span>
+    <span class="muted">Max pain ({{ l.near_expiry }})</span><span>{{ l.max_pain_near }}</span>
+    <span class="muted">Call / put OI</span><span>{{ '{:,.0f}'.format(l.total_call_oi) }} / {{ '{:,.0f}'.format(l.total_put_oi) }}</span>
+    <span class="muted">Top OI</span><span>{% for s in l.top_oi_strikes %}{{ s[0] }}{{ s[1] }} ({{ '{:,.0f}'.format(s[2]) }}){% if not loop.last %}, {% endif %}{% endfor %}</span>
+  </div></div>
+  <div><b>Technicals</b>{% if t and t.close %}<div class="kv">
+    <span class="muted">Trend</span><span>{{ t.trend_label }} · {{ '%+.1f'|format(t.pct_vs_sma20) }}% vs SMA20</span>
+    <span class="muted">SMA 20/50/200</span><span>{{ '%.2f'|format(t.sma20) }} / {{ '%.2f'|format(t.sma50) if t.sma50 else '–' }} / {{ '%.2f'|format(t.sma200) if t.sma200 else '–' }}</span>
+    <span class="muted">RSI14 · ATR%</span><span>{{ '%.0f'|format(t.rsi14) }} · {{ '%.1f'|format(t.atr_pct) }}%</span>
+    <span class="muted">52w range</span><span>{{ '%.2f'|format(t.low52) }}–{{ '%.2f'|format(t.high52) }} ({{ '%+.1f'|format(t.pct_from_high52) }}% from high)</span>
+    <span class="muted">Squeeze / breakout</span><span>{{ 'yes' if t.squeeze else 'no' }} / {{ t.breakout or '–' }}</span>
+    <span class="muted">RS vs SPY 20d</span><span>{{ '%+.1f'|format(t.rs_vs_bench_20d) if t.rs_vs_bench_20d is not none else '–' }} pts</span>
+    <span class="muted">Volume vs 20d</span><span>{{ '%.1f'|format(t.vol_vs_avg) if t.vol_vs_avg else '–' }}×</span>
+  </div>{% else %}<p class="muted">no price history</p>{% endif %}</div>
+  <div><b>Volatility</b> <span class="muted">(estimates)</span>{% if v %}<div class="kv">
+    <span class="muted">ATM IV</span><span>{{ '%.0f'|format((v.atm_iv or 0)*100) }}%{% if v.iv_rank is not none %} · rank {{ v.iv_rank|int }} / pct {{ v.iv_percentile|int }} <span class="muted">({{ v.iv_rank_source }})</span>{% endif %}</span>
+    <span class="muted">RV 10/20/60</span><span>{% for x in [v.rv10, v.rv20, v.rv60] %}{{ '%.0f'|format(x*100) if x else '–' }}{% if not loop.last %} / {% endif %}{% endfor %}%</span>
+    <span class="muted">Parkinson / GK</span><span>{{ '%.0f'|format((v.parkinson20 or 0)*100) }}% / {{ '%.0f'|format((v.garman_klass20 or 0)*100) }}%</span>
+    <span class="muted">Forecast</span><span>{{ '%.0f'|format((v.garch_forecast or 0)*100) }}% <span class="muted">{{ v.garch_model }}, {{ v.horizon_days }}d</span></span>
+    <span class="muted">IV − forecast</span><span class="{{ 'good' if (v.iv_minus_garch or 0) > 0 else 'warn' }}">{{ '%+.1f'|format((v.iv_minus_garch or 0)*100) }} pts {{ '(premium rich)' if (v.iv_minus_garch or 0) > 0 else '(premium cheap)' }}</span>
+    <span class="muted">Term slope · 25Δ skew</span><span>{{ '%+.1f'|format(v.term_slope*100) if v.term_slope is not none else '–' }} · {{ '%+.1f'|format(v.put_skew_25d*100) if v.put_skew_25d is not none else '–' }} pts</span>
+  </div>{% endif %}</div>
+  <div><b>Volume profile</b> {% if p and p.poc %}<span class="muted">({{ p.source }})</span><div class="kv">
+    <span class="muted">POC / VAH / VAL</span><span>{{ '%.2f'|format(p.poc) }} / {{ '%.2f'|format(p.vah) }} / {{ '%.2f'|format(p.val) }} · {{ p.location }}</span>
+    <span class="muted">HVN · LVN</span><span>{{ p.hvn|join(', ') }} · {{ p.lvn|join(', ') }}</span>
+    <span class="muted">VWAP session / window</span><span>{{ '%.2f'|format(p.vwap_session) if p.vwap_session else '–' }} / {{ '%.2f'|format(p.vwap_window) if p.vwap_window else '–' }}</span>
+    <span class="muted">AVWAP from low / high</span><span>{{ '%.2f'|format(p.avwap_from_low) if p.avwap_from_low else '–' }} ({{ p.anchor_low_date }}) / {{ '%.2f'|format(p.avwap_from_high) if p.avwap_from_high else '–' }} ({{ p.anchor_high_date }})</span>
+    <span class="muted">OBV 20d · CMF20 · up/down vol</span><span>{{ '%+.1f'|format(p.obv_slope_20d) if p.obv_slope_20d is not none else '–' }} · {{ '%+.2f'|format(p.cmf20) if p.cmf20 is not none else '–' }} · {{ '%.2f'|format(p.up_down_vol_ratio_10d) if p.up_down_vol_ratio_10d else '–' }}</span>
+  </div>{% else %}<p class="muted">unavailable</p>{% endif %}</div>
+  <div><b>Options activity</b> <span class="muted">({{ f.note if f else '' }})</span>{% if f %}<div class="kv">
+    <span class="muted">Call / put volume</span><span>{{ '{:,.0f}'.format(f.call_volume) }} / {{ '{:,.0f}'.format(f.put_volume) }}{% if f.pc_volume_ratio %} (P/C {{ '%.2f'|format(f.pc_volume_ratio) }}){% endif %}</span>
+    <span class="muted">Premium traded C / P</span><span>${{ '{:,.0f}'.format(f.call_premium) }} / ${{ '{:,.0f}'.format(f.put_premium) }}</span>
+    <span class="muted">Volume / OI</span><span>{{ '%.2f'|format(f.volume_vs_oi) if f.volume_vs_oi else '–' }}</span>
+    <span class="muted">Bias</span><span>{{ f.bias_label }} ({{ '%+.2f'|format(f.bias) }})</span>
+    {% if f.oi_change_date %}<span class="muted">OI Δ since {{ f.oi_change_date }}</span><span>calls {{ '{:+,.0f}'.format(f.net_call_oi_change) }}, puts {{ '{:+,.0f}'.format(f.net_put_oi_change) }}<br><span class="muted">adds: {{ f.oi_adds|join(', ') or '–' }}</span></span>{% endif %}
+    <span class="muted">Unusual</span><span>{% for u in f.unusual %}{{ u.contract }} vol {{ '{:,}'.format(u.volume) }} / OI {{ '{:,}'.format(u.oi) }}{% if not loop.last %}<br>{% endif %}{% else %}–{% endfor %}</span>
+  </div>{% endif %}</div>
+  <div><b>News</b>{% if n %} <span class="muted">({{ n.providers|join(', ') }}; {{ n.summary_source }})</span>
+    <p style="margin:4px 0">{{ n.summary or 'no recent headlines' }}</p>
+    {% if n.red_flags %}<div class="bad">⚠ {{ n.red_flags|join(', ') }}</div>{% endif %}
+    {% if n.catalysts %}<div class="good">✚ {{ n.catalysts|join(', ') }}</div>{% endif %}
+    <ul>{% for i in n['items'][:6] %}<li>{% if i.url %}<a href="{{ i.url }}" rel="noopener noreferrer" target="_blank">{{ i.title }}</a>{% else %}{{ i.title }}{% endif %} <span class="muted">{{ i.source }} · {{ i.published[:10] }}</span></li>{% endfor %}</ul>
+  {% else %}<p class="muted">news disabled</p>{% endif %}</div>
+</div>
+{% if d.cc %}<div class="exit"><b>Covered call on your shares:</b> SELL {{ d.cc.expiry }} {{ d.cc.legs[0].strike }}C @ {{ '%.2f'|format(d.cc.net_mid) }} × {{ d.cc.contracts }}<br>✅ {{ d.cc.take_profit }}<br>🛑 {{ d.cc.stop }}<br>⏱ {{ d.cc.time_stop }}</div>
+{% elif d.cc_status %}<p class="warn">{{ d.cc_status }}</p>{% endif %}
+{% if d.score %}<p class="muted">Score components: {% for k, val in d.score.components.items() %}{{ k }} {{ val }}{% if not loop.last %} · {% endif %}{% endfor %}{% for w in d.score.warnings %}<br><span class="warn">{{ w }}</span>{% endfor %}</p>{% endif %}
+{% if d.charts.gex %}<img class="chart" alt="{{ d.symbol }} GEX by strike" src="data:image/png;base64,{{ d.charts.gex }}">{% endif %}
+{% if d.charts.price %}<img class="chart" alt="{{ d.symbol }} price and volume profile" src="data:image/png;base64,{{ d.charts.price }}">{% endif %}
+{% endif %}
+</details>
+{% endfor %}
+
+{% if errors %}<h2>Data issues</h2><ul>{% for e in errors %}<li class="muted">{{ e }}</li>{% endfor %}</ul>{% endif %}
+
+<h2>Method</h2>
+<p class="muted">GEX uses the public dealer convention (dealers long calls, short puts), recomputed with Black-Scholes gamma at the current spot for expiries ≤ {{ max_dte }} days. Walls are the strikes with the largest call and put gamma exposure. The flip is where total modelled GEX crosses zero. Scores weigh regime, wall location (confirmed by the volume profile), IV against realized vol, trend, liquidity and options activity; severe news flags cost points, and earnings inside the trade window vetoes a trade. Exits: credit trades take profit at {{ (cfg_trades.take_profit_pct*100)|int }}% of the credit, stop when the loss reaches {{ cfg_trades.stop_loss_credit_multiple }}× the credit or the underlying closes beyond the short strike, and exit on time at {{ cfg_trades.time_exit_dte }} DTE or halfway to expiry. No rolling. Open interest updates once a day, so levels are prior-session estimates.</p>
+<p class="disc muted">{{ disclaimer }}</p>
+</main></body></html>

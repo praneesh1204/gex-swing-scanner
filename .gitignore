@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.env
+.DS_Store
+docs/probe_results.json
+
+# personal output: never commit (public repo)
+reports/*
+!reports/.gitkeep
+state/*
+!state/.gitkeep
+exports/
+*.parquet

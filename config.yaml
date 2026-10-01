@@ -1,0 +1,71 @@
+# gexscan configuration. Anything left out falls back to the defaults in src/gexscan/config.py.
+# Read-only tool: it prints ideas with exit plans, you decide and place trades yourself.
+
+watchlist:
+  - NVDA
+  - NBIS
+  - META
+  - AMZN
+  - MU
+  - CRDO
+  - AXTI
+  - AAOI
+  - TSEM
+  - HOOD
+  - IREN
+  - BMNR
+  - TQQQ
+
+# Research list: scan with `gexscan scan -s LITE,COHR,...` or move names into the watchlist.
+# LITE, COHR, MRVL, AVGO, AMD, CEG, GEV, TLN, BE
+
+# Shares you hold (you maintain this; nothing is read from a broker).
+# Every 100 shares -> a covered-call idea with a runaway-risk check and a 2x-credit stop.
+holdings: {}
+#  NBIS: 100
+
+data:
+  cboe_url: "https://cdn-api.cboe.com/api/global/delayed_quotes/options/{symbol}.json"
+  max_dte_for_levels: 60
+  # Optional FlashAlpha cross-check (FLASHALPHA_API_KEY in .env). Free plan = 5 calls/day.
+  flashalpha_symbols: [NVDA, META]
+  pause_between_symbols_s: 1.0
+  intraday_interval: "30m"        # volume profile bars (yfinance keeps ~60 days of 30m data)
+  intraday_days: 30
+
+news:
+  enabled: true
+  lookback_days: 5
+  llm: true                       # summarise headlines with Claude if ANTHROPIC_API_KEY is set
+  llm_max_symbols: 10
+
+scoring:
+  min_score_to_trade: 55
+  news_penalty: 10
+
+trades:
+  target_dte_min: 14
+  target_dte_max: 45
+  target_dte_ideal: 35
+  earnings_buffer_days: 5         # no trade if earnings land before expiry + buffer
+  short_delta_min: 0.12
+  short_delta_max: 0.30
+  min_credit_to_width: 0.25
+  take_profit_pct: 0.50           # credit trades: buy back at 50% of the credit
+  stop_loss_credit_multiple: 2.0  # credit trades: close when the loss reaches 2x the credit. No rolling.
+  time_exit_dte: 21               # or halfway to expiry, whichever comes first
+  debit_take_profit_pct: 0.75
+  account_size: 25000             # sizing only
+  max_risk_per_trade_pct: 0.02
+
+risk:
+  max_new_ideas_per_day: 3
+  max_ideas_per_symbol: 1
+  cooling_off_after_stop_days: 1  # a stop hit -> next scan shows watch-only ideas
+  max_total_risk_pct: 0.10
+
+output:
+  report_dir: "reports"
+  state_dir: "state"              # gexscan.db journal (git-ignored)
+  top_n: 5
+  charts: true

@@ -1,0 +1,39 @@
+name: daily-scan
+
+# Manual run only. The repo is public, and workflow artifacts on public repos can be downloaded by
+# any signed-in GitHub user, so the report (your ideas) is kept for 3 days and never committed or
+# published to Pages. The journal (state/gexscan.db) lives on your machine; run `gexscan` locally
+# for the day-over-day review.
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "30 18 * * 1-5"   # 18:30 UTC, Mon-Fri
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install .
+      - name: Run scan
+        env:
+          FLASHALPHA_API_KEY: ${{ secrets.FLASHALPHA_API_KEY }}   # all optional
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: gexscan scan --state /tmp/gexscan-state
+      - name: Job summary
+        if: always()
+        run: test -f reports/summary.md && cat reports/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gexscan-report
+          path: reports/
+          retention-days: 3

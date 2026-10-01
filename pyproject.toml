@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gexscan"
+version = "2.0.0"
+description = "Read-only 'follow the money' options scanner: dealer gamma walls, options volume, volume profile, technicals, news -> ranked trade ideas with exit plans, plus a daily review of earlier ideas."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "requests>=2.31",
+  "PyYAML>=6.0",
+  "Jinja2>=3.1",
+  "yfinance>=0.2.40",
+  "scipy>=1.10",
+  "arch>=6.2",
+  "matplotlib>=3.7",
+  "typer>=0.12",
+  "rich>=13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+parquet = ["pyarrow>=14"]
+
+[project.scripts]
+gexscan = "gexscan.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+gexscan = ["templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
