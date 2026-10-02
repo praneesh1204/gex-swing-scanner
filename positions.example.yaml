@@ -1,0 +1,29 @@
+# Copy to positions.yaml (git-ignored) and list the short-premium positions you have opened yourself.
+# `gexscan alerts` marks them on the current chain and alerts when cost to close >= 2x the credit
+# (the loss equals the credit received). Alert only: gexscan never closes, changes or places anything.
+#
+# credit   = net credit received per share (e.g. 1.20 for $120 per contract)
+# legs     = every leg; `expiry` on a leg overrides the position expiry (calendars / diagonals)
+# Positions taken via `gexscan journal take` are picked up automatically; don't list them twice.
+
+positions:
+  - symbol: NVDA
+    strategy: bull_put
+    expiry: 2026-11-20
+    credit: 1.20
+    contracts: 1
+    opened: 2026-10-01
+    legs:
+      - {action: SELL, type: P, strike: 160}
+      - {action: BUY, type: P, strike: 155}
+
+  - symbol: META
+    strategy: iron_condor
+    expiry: 2026-11-20
+    credit: 2.10
+    contracts: 2
+    legs:
+      - {action: BUY, type: P, strike: 640}
+      - {action: SELL, type: P, strike: 650}
+      - {action: SELL, type: C, strike: 780}
+      - {action: BUY, type: C, strike: 790}

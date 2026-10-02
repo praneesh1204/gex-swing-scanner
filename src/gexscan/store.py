@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS ideas (
   taken INTEGER DEFAULT 0,   -- 1 if you actually placed it (paper or real), via `gexscan journal take`
   last_mark REAL, last_mark_date TEXT, pnl REAL, closed_date TEXT, note TEXT
 );
+CREATE TABLE IF NOT EXISTS vol_snapshots (
+  date TEXT, symbol TEXT, atm_iv REAL, iv_rank REAL, iv_percentile REAL, iv_rank_source TEXT,
+  ts_ratio REAL, rr25 REAL, ff REAL, front_pump REAL, vrp REAL,
+  PRIMARY KEY (date, symbol)
+);
+CREATE TABLE IF NOT EXISTS alert_state (
+  key TEXT PRIMARY KEY,      -- e.g. "stop:journal:idea #4", "ivr:UPCO", "vix_ts"
+  state TEXT, value REAL, updated TEXT
+);
 """
 
 
@@ -82,6 +91,35 @@ class Store:
         df = pd.read_sql_query("SELECT expiry, strike, type, oi FROM contract_oi WHERE symbol=? AND date=?",
                                self.con, params=(symbol, row["d"]))
         return row["d"], df
+
+    def volume_history(self, symbol: str, before: dt.date, days: int = 40) -> pd.Series:
+        """Total CBOE chain option volume per day (call + put), from our own snapshots. One source only."""
+        q = ("SELECT date, call_volume + put_volume v FROM snapshots WHERE symbol=? AND date<? AND date>=? "
+             "AND call_volume IS NOT NULL ORDER BY date")
+        start = (before - dt.timedelta(days=days)).isoformat()
+        df = pd.read_sql_query(q, self.con, params=(symbol, before.isoformat(), start))
+        return pd.Series(df["v"].to_numpy(), index=pd.to_datetime(df["date"])) if len(df) else pd.Series(dtype=float)
+
+    # ---- vol snapshots (IV-rank crossings, term-structure history) -----------------------------------
+    def save_vol(self, date: dt.date, symbol: str, nv) -> None:
+        self.con.execute("INSERT OR REPLACE INTO vol_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                         (date.isoformat(), symbol, nv.atm_iv, nv.iv_rank, nv.iv_percentile, nv.iv_rank_source,
+                          nv.ts_ratio, nv.rr25, nv.ff, nv.front_pump, nv.vrp_c2c))
+        self.con.commit()
+
+    def last_vol(self, symbol: str, before: dt.date) -> dict | None:
+        r = self.con.execute("SELECT * FROM vol_snapshots WHERE symbol=? AND date<? ORDER BY date DESC LIMIT 1",
+                             (symbol, before.isoformat())).fetchone()
+        return dict(r) if r else None
+
+    # ---- alert de-duplication ------------------------------------------------------------------------
+    def alert_get(self, key: str) -> dict | None:
+        r = self.con.execute("SELECT * FROM alert_state WHERE key=?", (key,)).fetchone()
+        return dict(r) if r else None
+
+    def alert_set(self, key: str, state: str, value: float | None, when: dt.date) -> None:
+        self.con.execute("INSERT OR REPLACE INTO alert_state VALUES (?,?,?,?)", (key, state, value, when.isoformat()))
+        self.con.commit()
 
     # ---- ideas journal -------------------------------------------------------------------------
     def add_idea(self, rec: dict) -> int:

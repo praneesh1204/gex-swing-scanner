@@ -74,6 +74,7 @@ def test_end_to_end_and_next_day_review(cfg, tmp_path):
     out, state = tmp_path / "reports", tmp_path / "state"
     ctx = run(cfg, fixtures=FIX, today=TODAY, out_dir=out, state_dir=state)
     assert (out / "index.html").exists() and (out / "summary.md").exists()
+    assert "reaches 2× the credit (loss = 1× the credit)" in (out / "index.html").read_text()
     assert len(ctx["top"]) >= 1
     assert (state / "gexscan.db").exists()
 

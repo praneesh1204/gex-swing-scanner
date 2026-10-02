@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gexscan"
-version = "2.0.0"
-description = "Read-only 'follow the money' options scanner: dealer gamma walls, options volume, volume profile, technicals, news -> ranked trade ideas with exit plans, plus a daily review of earlier ideas."
+version = "2.2.0"
+description = "Read-only options scanner and strategy engine: dealer gamma, vol, flow, regime and events -> gated, confidence-scored strategy recommendations with exit plans, 2x-credit stop alerts and a synthetic backtest. Never places orders."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -34,7 +34,7 @@ gexscan = "gexscan.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-gexscan = ["templates/*.html"]
+gexscan = ["templates/*.html", "config/*.yaml", "web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

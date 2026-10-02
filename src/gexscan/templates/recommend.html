@@ -1,0 +1,74 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import idea_card %}
+{% block title %}gexscan recommend {{ today }}{% endblock %}
+{% block content %}
+<h1>Strategy engine · {{ today }}</h1>
+<div class="muted">Generated {{ generated }} · {{ not_advice }}</div>
+<div class="banner"><b>{{ no_exec }}</b></div>
+
+<h2>Market</h2>
+<ul>{% for x in market %}<li>{{ x }}</li>{% endfor %}</ul>
+
+<h2>Ideas ({{ rows|length }})</h2>
+<div class="muted">filters: {{ filters }}</div>
+{% if rows %}
+<div class="scroll"><table>
+  <tr><th>#</th><th>Ticker</th><th>Strategy</th><th>Expiry</th><th class="num">Net</th><th class="num">Max loss</th><th class="num">PoP</th><th>Exit rule</th><th class="num">Confidence</th></tr>
+  {% for x in rows %}
+  <tr><td>{{ x.i }}</td><td><b><a href="#idea-{{ x.i }}-{{ x.symbol }}">{{ x.symbol }}</a></b></td><td>{{ x.label }}</td><td>{{ x.expiry }}</td>
+    <td class="num">{{ x.net }}</td><td class="num{{ ' bad' if x.undefined }}">{{ x.max_loss }}</td><td class="num">{{ x.pop_txt }}</td>
+    <td>{{ x.stop_rule }}</td>
+    <td class="num {{ 'good' if x.bucket == 'High' else ('warn' if x.bucket == 'Medium' else 'bad') }}">{{ '%.1f'|format(x.score) }} {{ x.bucket }}</td></tr>
+  {% endfor %}
+</table></div>
+<div class="ideas">
+{% for v in ideas %}{{ idea_card(v) }}{% endfor %}
+</div>
+{% else %}
+<p><b>No idea passed the gates and the confidence floor today.</b> Sitting out is a position.</p>
+{% endif %}
+
+{% if rejected %}
+<h2>Scored but not shown</h2>
+<div class="scroll"><table>
+  <tr><th>Ticker</th><th>Strategy</th><th>Idea</th><th class="num">Confidence</th><th>Why</th></tr>
+  {% for x in rejected %}<tr><td>{{ x.symbol }}</td><td>{{ x.strategy }}</td><td class="muted">{{ x.summary }}</td><td class="num">{{ x.conf }}</td><td>{{ x.why }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<h2>Explain log</h2>
+<p class="muted">Why each strategy did or didn't fire, per ticker. Run <code>gexscan explain TICKER</code> for every signal state and gate.</p>
+{% for sym, lines in explain.items() %}
+<details><summary>{{ sym }} ({{ lines|length }})</summary>
+  <ul>{% for x in lines %}<li class="muted">{{ x }}</li>{% endfor %}</ul>
+</details>
+{% endfor %}
+
+<h2>Data freshness</h2>
+<div class="scroll"><table>
+  <tr><th>Ticker</th><th class="num">Spot</th><th>As of</th><th>Sources</th></tr>
+  {% for n in names %}
+  <tr><td><b>{{ n.symbol }}</b></td><td class="num">{{ n.spot if n.spot is not none else '–' }}</td><td>{{ n.as_of or '–' }}</td>
+    <td class="muted">{% for k, val in n.fresh.items() %}<b>{{ k }}</b> {{ val }}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% for e in n.errors %}<br><span class="warn">{{ e }}</span>{% endfor %}</td></tr>
+  {% endfor %}
+</table></div>
+{% if providers %}<p class="muted">Providers: {{ providers }}</p>{% endif %}
+{% if errors %}<h2>Data issues</h2><ul>{% for e in errors %}<li class="muted">{{ e }}</li>{% endfor %}</ul>{% endif %}
+
+<h2>How this works</h2>
+<ol class="how muted">
+  <li><b>Data.</b> For each ticker: the CBOE delayed option chain, about two years of daily bars, IV history from the journal, earnings dates and market data (VIX / VIX3M / VVIX, rates, CPI and FOMC dates).</li>
+  <li><b>Signals.</b> Each input becomes a discrete state, for example VIX term structure in contango, IV rank rich, or dealer gamma negative.</li>
+  <li><b>Gates.</b> <code>signal_sheet.yaml</code> lists, for every strategy, the states it requires (an unknown state earns half credit), any-of sets, preferences and warnings. A failed required gate drops that strategy for that ticker.</li>
+  <li><b>Build.</b> Each strategy picks real strikes from the chain (delta band, DTE window, liquidity) and computes the net, max loss, breakevens and PoP (lognormal estimate). The exit plan is fixed here, before the idea is shown.</li>
+  <li><b>Trade checks.</b> Earnings inside the trade, leg liquidity and the round-trip spread cost.</li>
+  <li><b>Confidence 0–100.</b> Points for regime, IV richness, structure, positioning, flow, liquidity and event risk, minus penalties (flow against the trade, binary events, stale data).</li>
+  <li><b>Rationale</b> in three levels: why premium is rich or cheap, what the market is pricing, and second-order effects.</li>
+  <li><b>Selection.</b> Confidence floor {{ '%g'|format(floor) }}, top N, a cap per ticker, defined risk only unless you opt in. Ideas that didn't make the cut are listed under "Scored but not shown".</li>
+  <li><b>Output.</b> This page plus JSON and markdown. Nothing is sent to a broker.</li>
+</ol>
+<p class="muted">Short premium: stop when the cost to close reaches {{ '%g'|format(stop_mult) }}× the credit (loss = {{ '%g'|format(stop_mult - 1) }}× the credit), take profit at the target, exit on time. No rolling. Debit trades: max loss is the debit, with a time stop and an invalidation level.</p>
+
+<p class="disc muted">{{ disclaimer }}</p>
+{% endblock %}

@@ -1,5 +1,6 @@
-# gexscan configuration. Anything left out falls back to the defaults in src/gexscan/config.py.
-# Read-only tool: it prints ideas with exit plans, you decide and place trades yourself.
+# gexscan configuration. Anything left out falls back to the defaults in src/gexscan/config/__init__.py.
+# Read-only tool: it prints ideas with exit plans and sends alerts; you decide and place trades yourself.
+# Signal thresholds and per-strategy gates live in src/gexscan/config/signal_sheet.yaml (see engine:).
 
 watchlist:
   - NVDA
@@ -19,8 +20,46 @@ watchlist:
 # Research list: scan with `gexscan scan -s LITE,COHR,...` or move names into the watchlist.
 # LITE, COHR, MRVL, AVGO, AMD, CEG, GEV, TLN, BE
 
+# ---- v2.2 tech universe: ideas come mainly from these themes ---------------------------------
+# The default `recommend` run scans every theme + the outside list + the watchlist. Names outside every theme
+# must reach confidence >= outside.min_confidence and are shown in their own section. Preference is a
+# filter, never a score boost. `recommend --theme optics,memory` limits a run; `-s` overrides everything.
+# A `themes:` block here replaces the default list (src/gexscan/config/__init__.py) rather than merging.
+universe:
+  mode: prefer                    # prefer | only | off (off = watchlist only, as in v2.1)
+  themes:
+    gpus:          {name: "GPUs & AI accelerators", tickers: [NVDA, AMD, AVGO, MRVL]}
+    cpus:          {name: "CPUs", tickers: [AMD, INTC, ARM]}
+    chips_foundry: {name: "Chips, foundry & equipment", tickers: [TSM, ASML, AMAT, LRCX, KLAC, TSEM, INTC]}
+    memory:        {name: "Memory & storage", tickers: [MU, WDC, STX, SNDK]}
+    networking:    {name: "Networking & interconnect", tickers: [ANET, CSCO, AVGO, MRVL, CIEN, CRDO, ALAB]}
+    optics:        {name: "Optics, lasers & silicon photonics", tickers: [LITE, COHR, AAOI, FN, AXTI, POET]}
+    power_semis:   {name: "Power semis", tickers: ["ON", MPWR, NVTS, VICR, POWI]}   # quote ON: YAML reads it as true
+    data_center:   {name: "Data centre", tickers: [EQIX, DLR, SMCI, DELL, VRT, NBIS]}
+    cooling:       {name: "Cooling & DC power", tickers: [VRT, NVT, MOD, ETN]}
+    energy:        {name: "Energy & power for AI", tickers: [CEG, VST, TLN, GEV, BE, OKLO, CCJ]}
+    infra:         {name: "AI infra & neoclouds", tickers: [NBIS, CRWV, IREN, APLD, ORCL]}
+    hyperscalers:  {name: "Hyperscalers", tickers: [MSFT, GOOGL, META, AMZN, ORCL]}
+  outside:
+    allow: true
+    symbols: [HOOD, BMNR, TQQQ, SPY, QQQ, IWM, AAPL, TSLA, COIN, PLTR]
+    min_confidence: 85            # High starts above 70; outside names need 85
+    max_per_day: 2
+  concentration:
+    max_ideas_per_theme: 3
+    correlated_warn_pct: 0.60     # warn when one theme holds > 60% of the shown ideas' max loss
+
+# ---- v2.2 web app: `gexscan web` (127.0.0.1 only, GET only, never places orders) ----------------
+web:
+  port: 8765
+  cache_ttl_s: 300                # live data cache; fixtures are cached for the life of the process
+pricing:
+  rate: 0.04                      # risk-free rate used by the visualizer
+sim:
+  paths: 20000                    # Monte Carlo paths per simulation (seeded, so results repeat)
+
 # Shares you hold (you maintain this; nothing is read from a broker).
-# Every 100 shares -> a covered-call idea with a runaway-risk check and a 2x-credit stop.
+# Every 100 shares -> a covered-call idea with a runaway-risk check and a stop at 2x the credit.
 holdings: {}
 #  NBIS: 100
 
@@ -52,7 +91,8 @@ trades:
   short_delta_max: 0.30
   min_credit_to_width: 0.25
   take_profit_pct: 0.50           # credit trades: buy back at 50% of the credit
-  stop_loss_credit_multiple: 2.0  # credit trades: close when the loss reaches 2x the credit. No rolling.
+  stop_credit_multiple: 2.0       # credit trades: buy back when cost to close = 2x the credit received
+                                  # (loss = 1x the credit). No rolling.
   time_exit_dte: 21               # or halfway to expiry, whichever comes first
   debit_take_profit_pct: 0.75
   account_size: 25000             # sizing only
@@ -63,9 +103,56 @@ risk:
   max_ideas_per_symbol: 1
   cooling_off_after_stop_days: 1  # a stop hit -> next scan shows watch-only ideas
   max_total_risk_pct: 0.10
+  enforce_budget: false           # true = drop ideas whose 1 contract risks more than the per-trade budget
 
 output:
   report_dir: "reports"
   state_dir: "state"              # gexscan.db journal (git-ignored)
   top_n: 5
   charts: true
+
+# ---- strategy engine: gexscan recommend / explain ------------------------------------------------
+engine:
+  signal_sheet: null              # path to your own copy of the signal sheet; null = packaged one
+  sheet_overrides: {}             # deep-merged into the sheet, e.g. {signals: {iv_rank: {rich: 55}}}
+  strategies: [csp, covered_call, bull_put, bear_call, bull_call, bear_put, calendar, double_calendar,
+               double_diagonal, iron_condor, earnings_crush]
+  min_confidence: 40              # Low < 40 <= Medium <= 70 < High
+  top_n: 10
+  max_per_ticker: 2
+  allow_undefined_risk: false     # short strangles etc. are opt-in and flagged UNDEFINED RISK
+  earnings_size_factor: 0.5       # earnings trades sized at half the normal risk budget
+
+macro:
+  enabled: true                   # FRED CSVs (keyless): fed funds, 2y/10y, curve, CPI, WTI
+  cpi_dates: []                   # empty = read the BLS CPI schedule from FRED's release calendar
+  fomc_dates: ["2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29",
+               "2026-09-16", "2026-10-28", "2026-12-09"]   # decision days; update each year
+  near_days: 3                    # FOMC/CPI this close = binary macro event
+
+events:
+  earnings_overrides: {}          # {SYMBOL: YYYY-MM-DD} when the free sources have no date
+  history_quarters: 8
+
+providers:
+  default_ttl_s: 3600             # HTTP cache in <state_dir>/cache/http
+  use_openbb: false               # OpenBB is AGPL-3.0: optional, never vendored
+  limits: {}                      # e.g. {finnhub: {min_interval_s: 1.1, daily_cap: 3000}}
+
+# ---- gexscan alerts: alert only, never an action ------------------------------------------------
+alerts:
+  sinks: [console, log]           # + webhook / telegram / email (env vars in .env.example)
+  positions_file: positions.yaml  # your open short premium (git-ignored); see positions.example.yaml
+  use_ibkr: false                 # read positions from the IBKR Client Portal gateway (GET only)
+  stop_warn_ratio: 0.875          # warn at 1.75x credit; STOP at 2x (stop_credit_multiple)
+  ivr_levels: [30, 50]
+  vvix_spike_pct: 15
+  earnings_window_days: 10
+
+# ---- gexscan backtest: SYNTHETIC replay ---------------------------------------------------------
+backtest:
+  years: 3
+  entry_every_days: 5
+  iv_premium: 1.10                # IV proxy = max(RV20, RV60) x this (no free historical chains)
+  slippage_pct_of_credit: 0.05
+  strategies: [csp, bull_put, bear_call, iron_condor, calendar]

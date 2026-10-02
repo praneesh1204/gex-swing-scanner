@@ -100,3 +100,61 @@ def price_chart(sym: str, hist: pd.DataFrame, lv, vp) -> str | None:
     except Exception as e:
         log.info("price chart %s failed: %s", sym, e)
         return None
+
+
+def payoff_chart(c, today) -> str | None:
+    """P/L per contract at the first expiry vs the underlying (strategy-engine idea). Later legs (calendars,
+    diagonals) are valued with Black-Scholes at their own IV, so that part of the curve is an estimate."""
+    if plt is None or not c.legs or not c.spot:
+        return None
+    try:
+        import numpy as np
+
+        from .strategies.base import pnl_at
+
+        first = min(l.expiry for l in c.legs)
+        ks = [l.strike for l in c.legs]
+        lo, hi = min(ks + [c.spot]), max(ks + [c.spot])
+        pad = max((hi - lo) * 0.6, c.spot * 0.08)
+        g = np.linspace(max(lo - pad, 0.01), hi + pad, 400)
+        p = pnl_at(c.legs, c.net, g, first, today) * 100
+        fig, ax = plt.subplots(figsize=(6.2, 2.6))
+        ax.plot(g, p, color=C_NET, lw=1.4)
+        ax.fill_between(g, p, 0, where=p >= 0, color=C_CALL, alpha=0.18, interpolate=True)
+        ax.fill_between(g, p, 0, where=p < 0, color=C_PUT, alpha=0.18, interpolate=True)
+        ax.axhline(0, color="#888", lw=0.8)
+        ax.axvline(c.spot, color=C_SPOT, lw=1.2, label=f"spot {c.spot:g}")
+        for b in c.breakevens:
+            ax.axvline(b, color="#999", lw=0.8, ls=":")
+        ax.set_ylabel("$ per contract", fontsize=8, color="#888")
+        late = any(l.expiry != first for l in c.legs)
+        ax.set_title(f"{c.symbol} {c.label}: P/L at {first}" + (" (later legs: BS estimate)" if late else "")
+                     + ", before costs", fontsize=9, color="#888")
+        ax.legend(fontsize=7, frameon=False, loc="best")
+        _style(ax)
+        return _b64(fig)
+    except Exception as e:
+        log.info("payoff chart %s failed: %s", c.symbol, e)
+        return None
+
+
+def equity_chart(trades) -> str | None:
+    """Cumulative P/L by exit date, one line per strategy (closed backtest trades; SYNTHETIC)."""
+    closed = [t for t in trades if t.reason != "open"]
+    if plt is None or not closed:
+        return None
+    try:
+        df = pd.DataFrame([{"strategy": t.strategy, "exit": pd.Timestamp(t.exit), "pnl": t.pnl} for t in closed])
+        fig, ax = plt.subplots(figsize=(7.5, 3.2))
+        for name, g in df.sort_values("exit").groupby("strategy", sort=False):
+            ax.plot(g["exit"], g["pnl"].cumsum(), lw=1.3, label=name)
+        ax.axhline(0, color="#888", lw=0.8)
+        ax.set_ylabel("cumulative $ (1 contract)", fontsize=8, color="#888")
+        ax.set_title("SYNTHETIC backtest: cumulative P/L by exit date", fontsize=9, color="#888")
+        ax.legend(fontsize=7, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=5)
+        ax.tick_params(axis="x", rotation=30)
+        _style(ax)
+        return _b64(fig)
+    except Exception as e:
+        log.info("equity chart failed: %s", e)
+        return None

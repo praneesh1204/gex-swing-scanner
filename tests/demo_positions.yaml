@@ -1,0 +1,8 @@
+# Demo positions on the synthetic fixture names (TODAY = 2026-09-25), for the README offline demo:
+#   gexscan alerts --positions tests/demo_positions.yaml --fixtures tests/fixtures --today 2026-09-25 ...
+# RICH is through its 2x-credit stop, UPCO is near it (WARN). Not real trades.
+positions:
+  - {symbol: RICH, strategy: bull_put, expiry: 2026-10-30, credit: 1.00,
+     legs: [{action: SELL, type: P, strike: 190}, {action: BUY, type: P, strike: 185}]}
+  - {symbol: UPCO, strategy: bull_put, expiry: 2026-10-30, credit: 0.86,
+     legs: [{action: SELL, type: P, strike: 217.5}, {action: BUY, type: P, strike: 212.5}]}

@@ -1,0 +1,47 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import idea_card %}
+{% block title %}gexscan explain {{ sym }} {{ today }}{% endblock %}
+{% block content %}
+<h1>Explain · {{ sym }} · {{ today }}</h1>
+<div class="muted">Generated {{ generated }}{% if spot is not none %} · spot {{ spot }}{% endif %}{% if as_of %} · as of {{ as_of }}{% endif %} · {{ not_advice }}</div>
+<div class="banner"><b>{{ no_exec }}</b></div>
+
+{% if not found %}
+<p class="bad"><b>{{ sym }} is not in this run.</b> Check the ticker, or pass it with <code>--fixtures</code> when running offline.</p>
+{% else %}
+<h2>Market</h2>
+<ul>{% for x in market %}<li>{{ x }}</li>{% endfor %}</ul>
+
+<h2>Signal states</h2>
+<div class="scroll"><table>
+  <tr><th>Signal</th><th>Scope</th><th>State</th><th class="num">Value</th><th>Detail</th></tr>
+  {% for s in states %}
+  <tr><td>{{ s.signal }}{% if s.proxy %} <span class="flag">PROXY</span>{% endif %}</td><td class="muted">{{ s.scope }}</td>
+    <td><b>{{ s.state }}</b></td><td class="num">{{ s.value }}</td><td class="muted">{{ s.detail }}</td></tr>
+  {% endfor %}
+</table></div>
+{% if fresh %}<p class="muted">Freshness: {% for k, val in fresh.items() %}<b>{{ k }}</b> {{ val }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+
+<h2>Ideas that passed ({{ ideas|length }})</h2>
+{% if ideas %}
+<div class="ideas">{% for v in ideas %}{{ idea_card(v) }}{% endfor %}</div>
+{% else %}
+<p><b>No {{ sym }} idea passed the gates.</b> The strategy log and gate lines below say why.</p>
+{% endif %}
+
+<h2>Strategy log</h2>
+{% if log %}<ul>{% for x in log %}<li>{{ x }}</li>{% endfor %}</ul>{% else %}<p class="muted">Nothing logged.</p>{% endif %}
+
+<h2>Gates by strategy</h2>
+{% for st in strategies %}
+<details{% if st.passed %} open{% endif %}><summary>{{ st.name }}: <span class="{{ 'good' if st.passed else 'bad' }}">{{ 'passed' if st.passed else 'failed' }}</span></summary>
+  <ul>{% for g in st.decisions %}<li class="o-{{ g.outcome }}">{{ g.text }}</li>{% endfor %}</ul>
+</details>
+{% else %}<p class="muted">No gate results for {{ sym }}.</p>{% endfor %}
+<p class="muted">✓ pass · ✗ fail (required gate: drops the strategy) · ? unknown (half credit) · ! warning · · informational</p>
+
+{% if errors %}<h2>Data issues</h2><ul>{% for e in errors %}<li class="muted">{{ e }}</li>{% endfor %}</ul>{% endif %}
+{% endif %}
+
+<p class="disc muted">{{ disclaimer }}</p>
+{% endblock %}

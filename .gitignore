@@ -15,3 +15,6 @@ state/*
 !state/.gitkeep
 exports/
 *.parquet
+positions.yaml
+alerts.log
+options-webapp-design-doc.md

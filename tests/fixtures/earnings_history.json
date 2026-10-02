@@ -1,0 +1,54 @@
+{
+  "EARN": [
+    {
+      "date": "2024-10-30",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-01-29",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-04-30",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-07-30",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-10-29",
+      "timing": "AMC"
+    },
+    {
+      "date": "2026-01-28",
+      "timing": "AMC"
+    },
+    {
+      "date": "2026-04-29",
+      "timing": "AMC"
+    }
+  ],
+  "UPCO": [
+    {
+      "date": "2025-02-12",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-05-14",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-08-13",
+      "timing": "AMC"
+    },
+    {
+      "date": "2025-11-12",
+      "timing": "AMC"
+    },
+    {
+      "date": "2026-02-11",
+      "timing": "AMC"
+    }
+  ]
+}

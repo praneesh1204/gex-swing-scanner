@@ -1,0 +1,48 @@
+{% extends "_base.html" %}
+{% block title %}gexscan alerts {{ today }}{% endblock %}
+{% block content %}
+<h1>Alerts · {{ today }}</h1>
+<div class="banner"><b>{{ footer }}</b></div>
+<div class="muted">{% for lv, n in counts.items() %}<span class="lvl lvl-{{ lv }}">{{ lv }} {{ n }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+  · {{ suppressed|length }} unchanged since the last run (not re-sent) · {{ not_advice }}</div>
+
+<h2>Fired this run ({{ alerts|length }})</h2>
+{% if alerts %}
+<div class="scroll"><table>
+  <tr><th>Level</th><th>Ticker</th><th>Alert</th><th>As of</th><th>Source</th></tr>
+  {% for a in alerts %}
+  <tr><td class="lvl lvl-{{ a.level }}">{{ a.level }}</td><td><b>{{ a.symbol or '–' }}</b></td>
+    <td><b>{{ a.title }}</b><br>{{ a.message }}</td><td class="muted">{{ a.as_of or '–' }}</td><td class="muted">{{ a.source or '–' }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}<p class="muted">Nothing new.</p>{% endif %}
+
+{% if suppressed %}
+<details><summary>Unchanged since the last run ({{ suppressed|length }})</summary>
+  <ul>{% for a in suppressed %}<li><span class="lvl lvl-{{ a.level }}">{{ a.level }}</span> {{ a.title }} <span class="muted">{{ a.message }}</span></li>{% endfor %}</ul>
+</details>
+{% endif %}
+
+<h2>Open short premium ({{ positions|length }})</h2>
+{% if positions %}
+<div class="scroll"><table>
+  <tr><th>Ticker</th><th>Strategy</th><th>Expiry</th><th>Legs</th><th class="num">Credit</th><th class="num">Cost to close</th><th class="num">× credit</th><th class="num">Stop at</th><th class="num">P/L</th><th>State</th><th>Source</th></tr>
+  {% for p in positions %}
+  <tr><td><b>{{ p.symbol }}</b></td><td>{{ p.strategy }}</td><td>{{ p.expiry }}</td><td>{{ p.legs }}</td>
+    <td class="num">{{ p.credit }}</td><td class="num">{{ p.cost }}</td><td class="num">{{ p.ratio }}</td><td class="num">{{ p.stop_at }}</td>
+    <td class="num {{ p.pnl_class }}">{{ p.pnl }}</td><td class="lvl st-{{ p.state }}">{{ p.state or '–' }}</td>
+    <td class="muted">{{ p.source }}{% if p.mark %}<br>{{ p.mark }}{% endif %}</td></tr>
+  {% endfor %}
+</table></div>
+<p class="muted">Stop = the cost to buy the position back reaches the stop level (2× the credit by default, a loss of 1× the credit). WARN fires as it gets close. Marks use delayed mid prices, so treat cost to close and P/L as estimates. No rolling: when a stop fires, the plan is to close.</p>
+{% else %}
+<p class="muted">No open short-premium positions (positions.yaml, journal "taken" ideas, IBKR if enabled).</p>
+{% endif %}
+
+{% if market %}<h2>Market regime</h2><ul>{% for x in market %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+
+{% if delivered %}<h2>Delivery</h2><ul>{% for k, v in delivered.items() %}<li><b>{{ k }}</b> <span class="muted">{{ v }}</span></li>{% endfor %}</ul>{% endif %}
+{% if errors %}<h2>Data issues</h2><ul>{% for e in errors %}<li class="muted">{{ e }}</li>{% endfor %}</ul>{% endif %}
+
+<p class="disc muted">{{ footer }} {{ not_advice }}</p>
+{% endblock %}
