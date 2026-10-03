@@ -1,0 +1,50 @@
+{
+ "UPCO": {
+  "name": "Upco Photonics (synthetic)",
+  "sector": "Technology",
+  "industry": "Optical components",
+  "market_cap": 61000000000.0,
+  "employees": 9400,
+  "summary": "Synthetic test company. A made-up maker of optical transceivers for AI data centres. Used to test an uptrend into earnings."
+ },
+ "DNCO": {
+  "name": "Downco Memory (synthetic)",
+  "sector": "Technology",
+  "industry": "Memory chips",
+  "market_cap": 18000000000.0,
+  "employees": 5200,
+  "summary": "Synthetic test company. A made-up memory supplier in a downtrend. Used to test bearish set-ups and negative gamma."
+ },
+ "PINCO": {
+  "name": "Pinco Power Semis (synthetic)",
+  "sector": "Technology",
+  "industry": "Power semiconductors",
+  "market_cap": 140000000000.0,
+  "employees": 21000,
+  "summary": "Synthetic test company. A made-up power-semiconductor name pinned between large call and put walls."
+ },
+ "EARN": {
+  "name": "Earnco Compute (synthetic)",
+  "sector": "Technology",
+  "industry": "GPUs and accelerators",
+  "market_cap": 410000000000.0,
+  "employees": 30000,
+  "summary": "Synthetic test company. A made-up accelerator designer with earnings days away. Used to test the earnings gate."
+ },
+ "RICH": {
+  "name": "Richvol Cooling (synthetic)",
+  "sector": "Industrials",
+  "industry": "Data-centre cooling",
+  "market_cap": 33000000000.0,
+  "employees": 12000,
+  "summary": "Synthetic test company. A made-up liquid-cooling supplier with rich implied volatility."
+ },
+ "TERM": {
+  "name": "Termco Energy (synthetic)",
+  "sector": "Utilities",
+  "industry": "Power for data centres",
+  "market_cap": 52000000000.0,
+  "employees": 7600,
+  "summary": "Synthetic test company. A made-up power producer whose volatility term structure is inverted."
+ }
+}

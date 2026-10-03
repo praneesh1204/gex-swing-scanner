@@ -1,0 +1,54 @@
+{# One strategy-engine idea (recommend + explain). v comes from reports/html.py idea_view(). #}
+{% macro idea_card(v) %}
+<div class="card idea" id="idea-{{ v.i }}-{{ v.symbol }}">
+  <h3>{{ v.header }}</h3>
+  <div><span class="score {{ 'good' if v.bucket == 'High' else ('warn' if v.bucket == 'Medium' else 'bad') }}">{{ '%.1f'|format(v.score) }}</span>
+    <span class="muted">/ 100 confidence ({{ v.bucket }})</span></div>
+  {% if v.flags %}<div>{% for f in v.flags %}<span class="flag{{ ' bad' if f.bad }}">{{ f.text }}</span>{% endfor %}</div>{% endif %}
+  <div class="idea-grid">
+  <div>
+  <h4>Trade</h4>
+  <div class="scroll"><table>
+    <tr><th></th><th>Contract</th><th class="num">DTE</th><th class="num">Bid</th><th class="num">Ask</th><th class="num">Mid</th><th class="num">IV</th><th class="num">Δ</th><th class="num">OI</th><th class="num">Vol</th></tr>
+    {% for l in v.legs %}
+    <tr><td><b class="{{ 'bad' if l.action == 'SELL' else 'good' }}">{{ l.action }}</b>{% if l.qty != 1 %} ×{{ l.qty }}{% endif %}</td><td>{{ l.contract }}</td>
+      <td class="num">{{ l.dte }}</td><td class="num">{{ l.bid }}</td><td class="num">{{ l.ask }}</td><td class="num">{{ l.mid }}</td>
+      <td class="num">{{ l.iv }}</td><td class="num">{{ l.delta }}</td><td class="num">{{ l.oi }}</td><td class="num">{{ l.volume }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% for x in v.facts %}<div class="muted">{{ x }}</div>{% endfor %}
+
+  <div class="exit">
+    <b>Exit plan: {{ v.stop_rule }}</b>
+    {% for k, x in v.exits %}<br>{{ {'Take profit': '✅', 'Stop': '🛑', 'Time': '⏱'}.get(k, '⚠') }} <b>{{ k }}:</b> {{ x }}{% endfor %}
+  </div>
+
+  {% if v.payoff %}<img class="chart" alt="{{ v.symbol }} payoff estimate" src="data:image/png;base64,{{ v.payoff }}">{% endif %}
+  </div>
+  <div>
+  <h4>Confidence</h4>
+  <table>
+    {% for s in v.subs %}
+    <tr><td>{{ s.cat }}</td><td class="num">{{ '%.1f'|format(s.points) }}/{{ '%g'|format(s.max) }}</td>
+      <td><span class="meter"><span style="width:{{ '%.0f'|format(s.pct) }}%"></span></span></td><td class="muted">{{ s.notes }}</td></tr>
+    {% endfor %}
+    {% for p in v.penalties %}
+    <tr class="bad"><td>penalty</td><td class="num">-{{ '%g'|format(p.points) }}</td><td></td><td>{{ p.reason }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h4>Rationale</h4>
+  {% for title, lines in v.levels %}
+  <div><b>{{ title }}</b><ul>{% for x in lines %}<li>{{ x }}</li>{% endfor %}</ul></div>
+  {% endfor %}
+  </div>
+  </div>
+
+  {% if v.warnings or v.notes %}<ul>{% for w in v.warnings %}<li class="warn">⚠ {{ w }}</li>{% endfor %}{% for n in v.notes %}<li class="muted">{{ n }}</li>{% endfor %}</ul>{% endif %}
+
+  <details><summary>Gates ({{ v.gates|length }})</summary>
+    <ul>{% for g in v.gates %}<li class="o-{{ g.outcome }}">{{ g.text }}</li>{% endfor %}</ul>
+  </details>
+  {% if v.sources %}<div class="muted">data: {{ v.sources }}</div>{% endif %}
+</div>
+{% endmacro %}

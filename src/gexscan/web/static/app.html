@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>gexscan · options research (read-only)</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/silver.css">
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<div id="banner" class="banner" role="alert" hidden></div>
+<header class="top">
+  <a class="brand" href="/" data-link="1"><span class="dot" aria-hidden="true"></span>gexscan <small class="muted">options research</small></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" data-link="1" data-nav="home">Themes</a>
+    <a href="/builder" data-link="1" data-nav="builder">Strategy Builder</a>
+    <a href="/about" data-link="1" data-nav="about">About</a>
+  </nav>
+  <div class="search" role="search">
+    <label class="sr" for="q">Ticker</label>
+    <input id="q" class="sym" type="text" list="symlist" placeholder="Ticker" autocomplete="off" spellcheck="false" maxlength="10">
+    <datalist id="symlist"></datalist>
+    <button id="go" class="btn" type="button">Open</button>
+  </div>
+  <div class="meta"><span id="mode"></span><span id="asof"></span></div>
+</header>
+<main id="main" tabindex="-1"><noscript>This app needs JavaScript (no data leaves your machine).</noscript></main>
+<footer id="foot"></footer>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+</body>
+</html>

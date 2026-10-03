@@ -1,0 +1,54 @@
+{% extends "_base.html" %}
+{% block title %}gexscan backtest {{ r.start }} to {{ r.end }} (SYNTHETIC){% endblock %}
+{% block content %}
+<h1>Backtest · {{ r.start }} to {{ r.end }}</h1>
+<div class="muted">{{ r.symbols|join(', ') }}{% if today %} · run date {{ today }}{% endif %}</div>
+<div class="banner bad"><b>{{ label }}</b></div>
+
+<h2>Results by strategy</h2>
+<div class="scroll"><table>
+  <tr><th>Strategy</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Avg P/L</th><th class="num">Total P/L</th><th class="num">Max DD</th><th class="num">Avg days</th><th>Exits</th></tr>
+  {% for s in stats %}
+  <tr><td><b>{{ s.strategy }}</b></td><td class="num">{{ s.n }}</td><td class="num">{{ s.win_rate }}</td><td class="num">{{ s.avg }}</td>
+    <td class="num {{ s.total_class }}">{{ s.total }}</td><td class="num">{{ s.dd }}</td><td class="num">{{ s.days }}</td><td class="muted">{{ s.exits or '–' }}</td></tr>
+  {% endfor %}
+</table></div>
+<p class="muted">P/L in $ per contract after slippage, one contract per entry. Exits: tp = profit target, stop = cost to close hit the credit multiple, stop_strike = closed beyond the short strike, time = time stop, expiry = held to expiry. No rolling.</p>
+
+{% if equity %}<img class="chart" alt="SYNTHETIC cumulative P/L by strategy" src="data:image/png;base64,{{ equity }}">{% endif %}
+
+<h2>Entries blocked by gates</h2>
+<div class="grid3">
+{% for s in stats %}
+  <div><b>{{ s.strategy }}</b>
+    {% if s.skipped %}<ul>{% for g, n in s.skipped %}<li>{{ g }} <span class="muted">{{ n }}</span></li>{% endfor %}</ul>{% else %}<p class="muted">none</p>{% endif %}
+  </div>
+{% endfor %}
+</div>
+
+<h2>By ticker</h2>
+<div class="grid3">
+{% for s in stats %}{% if s.by_symbol %}
+  <div><b>{{ s.strategy }}</b><table>
+    {% for sym, v in s.by_symbol %}<tr><td>{{ sym }}</td><td class="num">{{ v.n }}</td><td class="num {{ 'good' if v.pnl > 0 else ('bad' if v.pnl < 0 else '') }}">{{ '%+.0f'|format(v.pnl) }}</td></tr>{% endfor %}
+  </table></div>
+{% endif %}{% endfor %}
+</div>
+
+<details><summary>All closed trades ({{ trades|length }})</summary>
+<div class="scroll"><table>
+  <tr><th>Ticker</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Expiry</th><th>Legs</th><th class="num">Spot</th><th class="num">IV proxy</th><th class="num">Net</th><th class="num">Exit value</th><th class="num">P/L</th><th>Reason</th><th class="num">Days</th></tr>
+  {% for t in trades %}
+  <tr><td>{{ t.symbol }}</td><td>{{ t.strategy }}</td><td>{{ t.entry }}</td><td>{{ t.exit }}</td><td>{{ t.expiry }}</td><td>{{ t.legs }}</td>
+    <td class="num">{{ t.spot }}</td><td class="num">{{ t.iv }}</td><td class="num">{{ t.net }}</td><td class="num">{{ t.exit_value }}</td>
+    <td class="num {{ t.pnl_class }}">{{ t.pnl }}</td><td>{{ t.reason }}</td><td class="num">{{ t.days }}</td></tr>
+  {% endfor %}
+</table></div>
+</details>
+
+<h2>Assumptions</h2>
+<ul>{% for a in assumptions %}<li class="muted">{{ a }}</li>{% endfor %}</ul>
+{% if errors %}<h2>Data issues</h2><ul>{% for e in errors %}<li class="muted">{{ e }}</li>{% endfor %}</ul>{% endif %}
+
+<p class="disc muted">{{ label }} Not financial advice. This tool never places orders.</p>
+{% endblock %}

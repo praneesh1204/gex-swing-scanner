@@ -49,7 +49,7 @@ The flip mismatch is expected: the flip depends on the IV assumption for each re
 ## 3. Gaps vs. the v2 spec
 
 ### Correctness / rule violations (fix first)
-1. **Stop rule differs from the spec.** `trades.py` sets `stop = spread value >= 2 × credit`, i.e. **loss = 1 × credit**. Spec: "exit when loss reaches 2× credit" = spread value 3× credit. **Needs your decision:** see `strategy_rules.md` §C1, including the math showing that a 2×-loss stop never fires before max loss on a spread that collected ≥ 1/3 of its width.
+1. **Stop rule differs from the spec.** `trades.py` sets `stop = spread value >= 2 × credit`, i.e. **loss = 1 × credit**. Spec: "exit when loss reaches 2× credit" = spread value 3× credit. **Needs your decision:** see `strategy_rules.md` §C1, including the math showing that a 2×-loss stop never fires before max loss on a spread that collected ≥ 1/3 of its width. *Resolved in v2.1: the engine spec defines the stop as cost to close = 2× credit (loss = 1× credit).*
 2. **Rolling is suggested.** `review.py` action text says *"close, roll, or hedge"*, which violates "no rolling".
 3. **Covered calls / CSPs / wheel don't exist.** There's no runaway-risk veto on short calls.
 4. **Iron-condor stop is vague** ("close the tested side if price closes beyond a wall"), with no credit multiple.

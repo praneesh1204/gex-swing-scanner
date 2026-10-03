@@ -30,11 +30,12 @@ def cfg():
 # ---------- exit plans ----------
 
 def test_credit_trade_exit_plan_is_2x_credit_stop(cfg):
+    # spec: exit when the cost to close reaches 2x the credit received (loss = the credit), no rolling
     r = scan_symbol("UPCO", DataSource(cfg, fixtures=FIX, today=TODAY), cfg)
     tr = r.trade
     c = tr.net_mid
     assert tr.tp_value == pytest.approx(c * 0.5, abs=0.011)
-    assert tr.stop_value == pytest.approx(c * 3, abs=0.011)          # buy back at 3x = loss of 2x credit
+    assert tr.stop_value == pytest.approx(c * 2, abs=0.011)          # buy back at 2x = loss of 1x credit
     short_put = next(l.strike for l in tr.legs if l.action == "SELL")
     assert tr.stop_below == short_put
     assert "No rolling" in tr.stop and "roll" not in tr.take_profit.lower()
@@ -71,7 +72,7 @@ def _idea(expiry):
             "taken": 1, "expiry": expiry.isoformat(), "entry_net": 1.00, "contracts": 1, "spot": 100.0,
             "max_loss": 400, "width": 5, "legs": [{"action": "SELL", "type": "P", "strike": 95},
                                                    {"action": "BUY", "type": "P", "strike": 90}],
-            "tp_value": 0.50, "stop_value": 3.00, "stop_below": 95.0, "stop_above": None,
+            "tp_value": 0.50, "stop_value": 2.00, "stop_below": 95.0, "stop_above": None,
             "time_exit": (expiry - dt.timedelta(days=21)).isoformat()}
 
 
@@ -83,8 +84,24 @@ def test_review_hits_profit_target(cfg):
 
 def test_review_hits_2x_credit_stop(cfg):
     exp = TODAY + dt.timedelta(days=35)
-    r = review_idea(_idea(exp), _chain(exp, 4.00, 0.90), _lv(96), None, cfg, TODAY + dt.timedelta(days=3))
-    assert r["status"] == "stop" and r["pnl"] == pytest.approx(-210.0)
+    r = review_idea(_idea(exp), _chain(exp, 2.90, 0.80), _lv(96), None, cfg, TODAY + dt.timedelta(days=3))
+    assert r["status"] == "stop" and r["pnl"] == pytest.approx(-110.0) and "2x" in r["exit_reason"]
+
+
+def test_stop_rule_from_config_without_stored_plan(cfg):
+    exp = TODAY + dt.timedelta(days=35)
+    idea = _idea(exp)
+    idea.update(tp_value=None, stop_value=None)
+    r = review_idea(idea, _chain(exp, 1.95, 0.0), _lv(97), None, cfg, TODAY + dt.timedelta(days=3))
+    assert r["plan"]["stop"] == pytest.approx(2.0) and r["status"] == "open"
+
+
+def test_legacy_stop_key_keeps_its_meaning(tmp_path):
+    p = tmp_path / "c.yaml"
+    p.write_text("watchlist: [X]\ntrades:\n  stop_loss_credit_multiple: 2.0\n")
+    assert load_config(p)["trades"]["stop_credit_multiple"] == 3.0
+    p.write_text("watchlist: [X]\n")
+    assert load_config(p)["trades"]["stop_credit_multiple"] == 2.0
 
 
 def test_review_level_stop_on_close_below_short(cfg):

@@ -1,9 +1,10 @@
 """Build concrete defined-risk trade ideas from real bid/ask quotes, each with a full exit plan.
 
 Exit rules (docs/strategy_rules.md):
-  * Short premium: take profit at 50% of the credit; stop when the LOSS reaches 2x the credit
-    (buy-back at 3x credit), or the underlying closes beyond the short strike; time exit at 21 DTE
-    or halfway to expiry, whichever comes first. No rolling: a stopped trade is closed, full stop.
+  * Short premium: take profit at 50% of the credit; stop when the cost to close reaches 2x the
+    credit received (i.e. the loss equals the credit), or the underlying closes beyond the short
+    strike; time exit at 21 DTE or halfway to expiry, whichever comes first. No rolling: a stopped
+    trade is closed, full stop.
   * Debit spreads: max loss = debit; take profit at 75% of max profit; invalidation level
     (underlying close below the put wall / long strike); same time exit.
 Ideas only. Nothing here talks to a broker.
@@ -20,6 +21,7 @@ from .analytics import bs
 from .analytics.gex import Levels
 from .analytics.technicals import Technicals
 from .analytics.volatility import prob_touch
+from .config import stop_multiple
 from .data.cboe import Chain
 from .scoring import Score
 
@@ -170,16 +172,17 @@ def _credit_spread(chain: Chain, lv: Levels, expiry, cp: str, cfg: dict, credit_
 
 
 def _credit_exits(tr: Trade, credit: float, width: float, cfg: dict, texit: dt.date) -> None:
-    tp, k = cfg["take_profit_pct"], cfg.get("stop_loss_credit_multiple", 2.0)
+    tp, m = cfg["take_profit_pct"], stop_multiple(cfg)
     tr.width = width
     tr.tp_value = round(credit * (1 - tp), 2)
-    tr.stop_value = round(credit * (1 + k), 2)
+    tr.stop_value = round(credit * m, 2)
     tr.time_exit = texit.isoformat()
     tr.take_profit = f"Buy back at {tr.tp_value:.2f} ({int(tp * 100)}% of the {credit:.2f} credit kept)"
     tr.time_stop = f"Close on {tr.time_exit} if neither target nor stop has hit"
-    loss_stop = f"cost to close >= {tr.stop_value:.2f} (loss = {k:g}x credit = ${credit * k * 100:,.0f}/contract)"
+    loss_stop = (f"cost to close >= {tr.stop_value:.2f} ({m:g}x the credit; loss = {m - 1:g}x credit "
+                 f"= ${credit * (m - 1) * 100:,.0f}/contract)")
     if tr.stop_value >= width:
-        tr.notes.append(f"Credit is >= 1/{k + 1:g} of width, so the {k:g}x-credit stop sits at max loss; "
+        tr.notes.append(f"Credit is >= 1/{m:g} of width, so the {m:g}x-credit stop sits at max loss; "
                         "the underlying-close stop is the one that matters")
     lvl = []
     if tr.stop_below:
@@ -201,12 +204,12 @@ def _csp_alternative(chain: Chain, expiry, short: Leg, cfg: dict, dte: int, texi
     if notional > cfg.get("csp_max_notional_pct", 0.30) * acct or short.mid <= 0:
         return None
     c = short.mid
-    k, tp = cfg.get("stop_loss_credit_multiple", 2.0), cfg["take_profit_pct"]
+    m, tp = stop_multiple(cfg), cfg["take_profit_pct"]
     return {
         "setup": "cash_secured_put", "summary": f"SELL {short.strike:g}P {expiry} @ {c:.2f} credit (cash-secured)",
         "cash_required": round(notional - c * 100), "credit": round(c * 100),
         "yield_pct": round(c / short.strike * 100, 2), "annualised_pct": round(c / short.strike * 365 / max(dte, 1) * 100, 1),
-        "take_profit": f"Buy back at {c * (1 - tp):.2f}", "stop": f"Buy back at {c * (1 + k):.2f} (loss = {k:g}x credit). No rolling.",
+        "take_profit": f"Buy back at {c * (1 - tp):.2f}", "stop": f"Buy back at {c * m:.2f} ({m:g}x credit; loss = {m - 1:g}x credit). No rolling.",
         "time_exit": texit.isoformat(),
         "note": "Only if you want to own 100 shares at this price (wheel). Assignment is possible any time.",
     }
@@ -339,7 +342,7 @@ def build_covered_call(chain: Chain, lv: Levels, tech: Technicals, shares: int, 
     tr = Trade(chain.symbol, "covered_call", expiry.isoformat(), dte, [sh], round(c, 2), round(sh.bid, 2),
                round(c * 100), 0, [], round(1 - abs(sh.delta), 2), _touch(S, sh.strike, dte, float(row["iv_use"]), "C"),
                contracts=n)
-    tr.max_loss = round(c * cfg.get("stop_loss_credit_multiple", 2.0) * 100)   # planned loss on the option at the stop
+    tr.max_loss = round(c * (stop_multiple(cfg) - 1) * 100)   # planned loss on the option at the stop
     tr.stop_above = sh.strike
     _credit_exits(tr, c, sh.strike, cfg, time_exit_date(today, expiry, cfg))
     tr.notes += [f"Covers {n * 100} of your {shares} shares. Upside above {sh.strike:g} is capped until you close.",

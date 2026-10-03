@@ -2,7 +2,7 @@
 
 Each open idea gets:
   * a mark (spread value at today's mids) and P/L, estimated from delayed quotes
-  * an exit check: take-profit / stop (2x-credit loss or underlying close beyond the level) / time exit / expired
+  * an exit check: take-profit / stop (cost to close >= 2x credit, or underlying close beyond the level) / time exit / expired
   * a setup label from the levels it was built on: "setup intact", "watch/reversal", "key level broken"
   * one action: HOLD, or CLOSE (reason). Never "roll".
 """
@@ -12,6 +12,8 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+
+from .config import stop_multiple
 
 BULLISH = {"bull_put", "call_debit", "cash_secured_put"}
 BEARISH = {"bear_call", "covered_call"}
@@ -96,7 +98,7 @@ def _plan(idea: dict, cfg: dict) -> dict:
     if tp is None:
         if credit:
             tp = e * (1 - t["take_profit_pct"])
-            stop = e * (1 + t.get("stop_loss_credit_multiple", 2.0))
+            stop = e * stop_multiple(t)
         else:
             w = _f(idea.get("width")) or 0
             tp = -e + t.get("debit_take_profit_pct", 0.75) * (w + e)
@@ -156,7 +158,8 @@ def review_idea(idea: dict, chain, lv, tech, cfg: dict, today: dt.date) -> dict:
             if not plan["credit"] and value >= plan["tp"]:
                 hits.append(("tp", f"profit target: spread worth {value:.2f} >= {plan['tp']:.2f}"))
             if plan["credit"] and plan["stop"] is not None and value >= plan["stop"]:
-                hits.append(("stop", f"stop: cost to close {value:.2f} >= {plan['stop']:.2f} (loss >= 2x credit)"))
+                hits.append(("stop", f"stop: cost to close {value:.2f} >= {plan['stop']:.2f} "
+                             f"({plan['stop'] / e:.2g}x the {e:.2f} credit)"))
         if plan["below"] is not None and close < plan["below"]:
             hits.append(("stop", f"stop: {idea['symbol']} {close:.2f} closed below {plan['below']:g}"))
         if plan["above"] is not None and close > plan["above"]:

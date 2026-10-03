@@ -1,0 +1,438 @@
+# gexscan signal sheet (spec §3): raw numbers -> signal states -> strategy gates.
+#
+# This file is the whole ruleset. Code reads it; nothing below is duplicated as `if`s elsewhere.
+# Override any value from config.yaml without copying the file:
+#   engine:
+#     sheet_overrides: {signals: {iv_rank: {rich_above: 55}}, strategies: {csp: {build: {dte: [25, 45]}}}}
+# or point engine.signal_sheet at your own copy. `gexscan explain TICKER` prints every gate decision.
+#
+# Gate syntax (per strategy):
+#   required:  {signal: {in: [states]} | {not_in: [states]}, ...}   all must pass, else the idea is dropped
+#   any_of:    [{signal: cond}, ...]                                 at least one must pass (also required)
+#   preferred: {signal: cond}                                        feed confidence, never drop
+#   warn:      {signal: cond}                                        if the condition MATCHES -> warning
+# A condition can carry `unknown: pass | fail | warn` (default warn: the gate passes at half credit and the
+# missing input is named in the warnings). Use `fail` where an unknown input would hide the edge itself.
+
+signals:
+  # ---------------- market regime (category: regime) ----------------
+  vix_ts:
+    category: regime
+    desc: "VIX / VIX3M. < 1.0 = contango (calm), >= 1.0 = backwardation (stress)"
+    flat_from: 0.95            # 0.95-1.0 is still contango by the spec's cut, but labelled 'flat'
+    backwardation_at: 1.0      # our cut (spec: >= 1.0). Stand down on premium selling at/above it.
+  vix_level:
+    category: regime
+    desc: "VIX regime band"
+    calm_below: 15
+    stressed_above: 25
+    extreme_above: 30          # > 30: no new short vol
+  vvix:
+    category: regime
+    desc: "VVIX (vol of VIX). Elevated/spiking = long vega is pricey and fragile; short vol has fat tails"
+    elevated_at: 110
+    spike_at: 125
+    spike_5d_pct: 15           # VVIX up >= 15% over 5 sessions also counts as a spike
+
+  # ---------------- IV richness (category: iv_richness) ----------------
+  iv_rank:
+    category: iv_richness
+    desc: "52-week IV rank (own snapshots; falls back to a labelled RV proxy)"
+    low_below: 25              # < 25: prefer debit / calendar / long vega, or stand aside
+    sell_above: 30             # > 30: sell zone
+    rich_above: 50             # > 50: rich (condors)
+  iv_percentile:
+    category: iv_richness
+    desc: "52-week IV percentile"
+    elevated_at: 60            # earnings crush wants IV elevated into the print
+  vrp:
+    category: iv_richness
+    desc: "IV - RV in vol points, close-to-close AND Parkinson (both must agree)"
+    positive_min_pts: 2.0      # 'by a meaningful margin'
+    negative_below_pts: 0.0
+
+  # ---------------- structure (category: structure) ----------------
+  term_structure:
+    category: structure
+    desc: "single-name ATM IV, front (~30 DTE) / back (~60 DTE)"
+    front_dte: 30
+    back_dte: 60
+    backwardation_at: 1.03     # front IV >= 1.03 x back IV
+    contango_below: 0.97
+  forward_factor:
+    category: structure
+    desc: "(front IV - forward IV) / forward IV between the two calendar expiries (kdubb-labs idea)"
+    high_at: 0.20
+  skew:
+    category: structure
+    desc: "25-delta risk reversal at ~30 DTE: IV(25d put) - IV(25d call), vol points"
+    put_rich_pts: 3.0          # rr25 >= 3 vol pts, or put25/ATM >= ratio below
+    put_rich_ratio: 1.08
+    call_rich_pts: 0.0         # rr25 <= 0: calls bid over puts (squeeze / takeover chatter)
+  earnings_front:
+    category: structure
+    desc: "front expiry that contains earnings vs the next expiry (pre-earnings pump)"
+    pumped_at: 1.10            # IV(expiry holding the print) >= 1.10 x IV(next expiry)
+  earnings_move:
+    category: iv_richness
+    desc: "implied move into earnings (straddle/spot) vs mean |historical earnings move|"
+    rich_at: 1.20              # implied >= 1.2x history: crush trades have an edge
+    cheap_at: 0.80             # implied <= 0.8x history: premium is cheap; long vol may be better
+    min_history: 4             # need this many past prints, else 'unknown'
+
+  # ---------------- positioning (category: positioning) ----------------
+  gex:
+    category: positioning
+    desc: "net dealer gamma sign + spot vs gamma flip (a vol regime, not a direction call)"
+  range:
+    category: positioning
+    desc: "range-bound = positive gamma AND spot inside the walls AND no strong trend"
+    max_abs_pct_vs_sma20: 4.0
+  lean:
+    category: positioning
+    desc: "directional lean from trend + positioning"
+  support:
+    category: positioning
+    desc: "put wall / value-area low below spot within max_dist_pct"
+    max_dist_pct: 15
+  resistance:
+    category: positioning
+    desc: "call wall / value-area high above spot within max_dist_pct"
+    max_dist_pct: 15
+
+  # ---------------- flow (category: flow) ----------------
+  flow:
+    category: flow
+    desc: "options flow lean. Free data = PROXY (chain volume/OI/premium); Unusual Whales = trade-side"
+    bias_at: 0.20              # |bias| >= 0.20 -> bullish / bearish
+    pc_extreme_high: 1.20      # CBOE equity put/call: contrarian context only, shown in the rationale
+    pc_extreme_low: 0.50
+
+  # ---------------- liquidity (category: liquidity) ----------------
+  liquidity:
+    category: liquidity
+    desc: "name-level: ATM bid-ask and total OI. Each leg is checked again when a trade is built"
+    max_atm_spread_pct: 0.10
+    min_total_oi: 2000
+    # per-leg, used by the builders (options-scanner weights: spread .40 / OI .30 / volume .20 / staleness .10)
+    max_leg_spread_pct: 0.25
+    min_leg_oi: 50
+    calendar_max_roundtrip: 0.25   # calendar: (sum of leg spreads) / debit above this -> reject (timps0n)
+    credit_roundtrip_warn: 0.50    # credit trades: round-trip bid-ask / credit above this -> warning + penalty
+    credit_roundtrip_max: 1.00     # ... above this -> reject (the spread eats the whole credit)
+
+  # ---------------- events (category: event) ----------------
+  earnings:
+    category: event
+    desc: "days to the next report"
+    imminent_days: 10          # <= 10 days: crush window; blocks CSP/CC/spreads held through the print
+    horizon_days: 50           # > 50 days: clear for a 30-45 DTE trade
+  macro:
+    category: event
+    desc: "FOMC / CPI within near_days (from config macro.near_days)"
+  news:
+    category: event
+    desc: "headline flags (lexicon). Severe flags = red_flag; binary words = binary"
+    binary_words: ["FDA", "PDUFA", "trial", "readout", "vote", "ruling", "verdict", "court", "approval", "merger"]
+
+# ======================================================================================================
+strategies:
+  csp:
+    label: "Cash-secured put"
+    direction: bullish
+    vol_view: short
+    kind: credit
+    risk: defined              # cash-secured: max loss = (strike - credit) x 100, i.e. stock to zero
+    avoid_earnings_in_trade: true
+    gates:
+      required:
+        vix_ts: {in: [contango, flat]}
+        vix_level: {not_in: [extreme]}
+        iv_rank: {in: [sell, rich], unknown: fail}
+        vrp: {in: [positive], unknown: fail}
+        earnings: {in: [clear, none, upcoming]}     # upcoming is fine only if the expiry is before it (checked per trade)
+        support: {in: [below], unknown: fail}
+        liquidity: {in: [ok]}
+      preferred:
+        lean: {in: [bullish, neutral]}
+        gex: {in: [positive]}
+        skew: {in: [put_rich]}
+        vvix: {in: [normal]}
+        flow: {not_in: [bearish]}
+        macro: {in: [clear]}
+      warn:
+        news: {in: [red_flag, binary]}
+        lean: {in: [bearish]}
+    build: {delta: [0.16, 0.30], target_delta: 0.22, dte: [30, 45], target_dte: 38}
+
+  covered_call:
+    label: "Covered call (holdings only)"
+    direction: neutral_bullish
+    vol_view: short
+    kind: credit
+    risk: defined              # the call is covered by 100 shares you hold; the stock risk is yours already
+    avoid_earnings_in_trade: true
+    needs_holdings: true
+    gates:
+      required:
+        iv_rank: {in: [sell, rich], unknown: fail}
+        resistance: {in: [above], unknown: fail}
+        earnings: {in: [clear, none, upcoming]}
+        liquidity: {in: [ok]}
+      preferred:
+        vix_ts: {in: [contango, flat]}
+        vrp: {in: [positive]}
+        lean: {in: [neutral, bullish]}
+        gex: {in: [positive]}
+        flow: {not_in: [bullish]}                  # strong call buying = runaway risk through the strike
+      warn:
+        lean: {in: [bullish]}
+        news: {in: [red_flag, binary]}
+    build: {delta: [0.20, 0.30], target_delta: 0.25, dte: [30, 45], target_dte: 38}
+
+  bull_put:
+    label: "Bull put spread"
+    direction: bullish
+    vol_view: short
+    kind: credit
+    risk: defined
+    avoid_earnings_in_trade: true
+    gates:
+      required:
+        vix_ts: {in: [contango, flat]}
+        vix_level: {not_in: [extreme]}
+        iv_rank: {in: [sell, rich], unknown: fail}
+        vrp: {in: [positive], unknown: fail}
+        lean: {in: [bullish, neutral]}
+        support: {in: [below], unknown: fail}
+        earnings: {in: [clear, none, upcoming]}
+        liquidity: {in: [ok]}
+      preferred:
+        skew: {in: [put_rich]}                     # rich put skew = you're paid extra for the side you sell
+        gex: {in: [positive]}
+        flow: {not_in: [bearish]}
+        vvix: {in: [normal]}
+        macro: {in: [clear]}
+      warn:
+        skew: {in: [call_rich]}
+        news: {in: [red_flag, binary]}
+    build: {delta: [0.16, 0.30], target_delta: 0.25, dte: [30, 45], target_dte: 38,
+            width_pct: 0.04, target_credit_to_width: 0.33,   # spec: credit ~1/3 of the width
+            min_credit_to_width: 0.25}                       # hard floor; under 1/3 = warning + lower score
+
+  bear_call:
+    label: "Bear call spread"
+    direction: bearish
+    vol_view: short
+    kind: credit
+    risk: defined
+    avoid_earnings_in_trade: true
+    gates:
+      required:
+        vix_ts: {in: [contango, flat]}
+        vix_level: {not_in: [extreme]}
+        iv_rank: {in: [sell, rich], unknown: fail}
+        vrp: {in: [positive], unknown: fail}
+        lean: {in: [bearish, neutral]}
+        resistance: {in: [above], unknown: fail}
+        earnings: {in: [clear, none, upcoming]}
+        liquidity: {in: [ok]}
+      preferred:
+        skew: {in: [call_rich]}                    # rare in equities; neutral skew scores half
+        gex: {in: [positive]}
+        flow: {not_in: [bullish]}
+        vvix: {in: [normal]}
+        macro: {in: [clear]}
+      warn:
+        news: {in: [red_flag, binary]}
+    build: {delta: [0.16, 0.30], target_delta: 0.25, dte: [30, 45], target_dte: 38,
+            width_pct: 0.04, target_credit_to_width: 0.33,   # spec: credit ~1/3 of the width
+            min_credit_to_width: 0.25}                       # hard floor; under 1/3 = warning + lower score
+
+  bull_call:
+    label: "Bull call spread (debit)"
+    direction: bullish
+    vol_view: long
+    kind: debit
+    risk: defined              # max loss = debit paid
+    avoid_earnings_in_trade: true
+    gates:
+      required:
+        vix_level: {not_in: [extreme]}
+        lean: {in: [bullish]}
+        iv_rank: {not_in: [rich]}                  # buying premium: not when options are at their richest
+        earnings: {in: [clear, none, upcoming]}
+        liquidity: {in: [ok]}
+      preferred:
+        iv_rank: {in: [low, mid]}
+        support: {in: [below]}                     # gives the trade an invalidation level
+        flow: {not_in: [bearish]}
+        vix_ts: {in: [contango, flat]}
+        macro: {in: [clear]}
+      warn:
+        news: {in: [red_flag, binary]}
+    build: {long_delta: 0.55, dte: [30, 60], target_dte: 45, width_pct: 0.06, max_debit_to_width: 0.60,
+            take_profit_pct: 0.50, stop_value_pct: 0.50}
+
+  bear_put:
+    label: "Bear put spread (debit)"
+    direction: bearish
+    vol_view: long
+    kind: debit
+    risk: defined              # max loss = debit paid
+    avoid_earnings_in_trade: true
+    gates:
+      required:
+        vix_level: {not_in: [extreme]}
+        lean: {in: [bearish]}
+        iv_rank: {not_in: [rich]}
+        earnings: {in: [clear, none, upcoming]}
+        liquidity: {in: [ok]}
+      preferred:
+        iv_rank: {in: [low, mid]}
+        resistance: {in: [above]}                  # gives the trade an invalidation level
+        flow: {not_in: [bullish]}
+        macro: {in: [clear]}
+      warn:
+        news: {in: [red_flag, binary]}
+    build: {long_delta: 0.55, dte: [30, 60], target_dte: 45, width_pct: 0.06, max_debit_to_width: 0.60,
+            take_profit_pct: 0.50, stop_value_pct: 0.50}
+
+  iron_condor:
+    label: "Iron condor"
+    direction: neutral
+    vol_view: short
+    kind: credit
+    risk: defined
+    avoid_earnings_in_trade: true
+    gates:
+      required:
+        vix_ts: {in: [contango, flat]}
+        vix_level: {not_in: [extreme, stressed]}
+        iv_rank: {in: [rich], unknown: fail}
+        vrp: {in: [positive], unknown: fail}
+        gex: {in: [positive], unknown: fail}
+        range: {in: [range_bound]}
+        earnings: {in: [clear, none, upcoming]}
+        liquidity: {in: [ok]}
+      preferred:
+        lean: {in: [neutral]}
+        vvix: {in: [normal]}
+        flow: {in: [neutral]}
+        macro: {in: [clear]}
+      warn:
+        news: {in: [red_flag, binary]}
+    build: {delta: 0.16, dte: [30, 45], target_dte: 38, width_pct: 0.04, min_credit_to_width: 0.25,
+            place: em_edges}       # shorts ~16 delta, nudged to the expected-move tent edges
+    # short strangle = the same shorts without wings. UNDEFINED RISK: only with engine.allow_undefined_risk.
+    strangle_opt_in: true
+
+  calendar:
+    label: "Calendar spread (long vega)"
+    direction: neutral
+    vol_view: long
+    kind: debit
+    risk: defined              # max loss = debit paid
+    gates:
+      any_of:                  # the change-in-vol thesis needs one of these
+        - term_structure: {in: [backwardation]}
+        - forward_factor: {in: [high]}
+        - earnings_front: {in: [pumped]}
+      required:
+        range: {in: [range_bound], unknown: fail}
+        vvix: {not_in: [spike]}
+        liquidity: {in: [ok]}
+      preferred:
+        gex: {in: [positive]}
+        vvix: {in: [normal]}
+        iv_rank: {in: [low, mid, sell]}           # long vega: cheaper back month is better
+        lean: {in: [neutral]}
+        vix_ts: {in: [contango, flat]}
+      warn:
+        vvix: {in: [elevated]}
+        news: {in: [red_flag, binary]}
+    build: {front_dte: [21, 45], back_gap_days: [21, 45], strike: atm_or_wall, max_wall_dist_pct: 3,
+            take_profit_pct: 0.25, stop_value_pct: 0.50, exit_days_before_front: 5}
+
+  double_calendar:
+    label: "Double calendar (EM edges)"
+    direction: neutral
+    vol_view: long
+    kind: debit
+    risk: defined
+    gates:
+      any_of:
+        - term_structure: {in: [backwardation]}
+        - forward_factor: {in: [high]}
+        - earnings_front: {in: [pumped]}
+      required:
+        range: {in: [range_bound], unknown: fail}
+        lean: {in: [neutral]}
+        vvix: {not_in: [spike]}
+        liquidity: {in: [ok]}
+      preferred:
+        gex: {in: [positive]}
+        vvix: {in: [normal]}
+        iv_rank: {in: [low, mid, sell]}
+      warn:
+        vvix: {in: [elevated]}
+        news: {in: [red_flag, binary]}
+    build: {front_dte: [21, 45], back_gap_days: [21, 45], place: em_edges,
+            take_profit_pct: 0.25, stop_value_pct: 0.50, exit_days_before_front: 5}
+
+  double_diagonal:
+    label: "Double diagonal"
+    direction: neutral
+    vol_view: long
+    kind: debit
+    risk: defined
+    gates:
+      any_of:
+        - term_structure: {in: [backwardation]}
+        - forward_factor: {in: [high]}
+        - earnings_front: {in: [pumped]}
+      required:
+        range: {in: [range_bound], unknown: fail}
+        lean: {in: [neutral]}
+        vvix: {not_in: [spike]}
+        iv_rank: {in: [mid, sell], unknown: fail}   # 'moderate IVR'
+        liquidity: {in: [ok]}
+      preferred:
+        gex: {in: [positive]}
+        vvix: {in: [normal]}
+      warn:
+        vvix: {in: [elevated]}
+        news: {in: [red_flag, binary]}
+    build: {front_dte: [21, 45], back_gap_days: [21, 45], place: em_edges, long_offset_strikes: 1,
+            take_profit_pct: 0.25, stop_value_pct: 0.50, exit_days_before_front: 5}
+
+  earnings_crush:
+    label: "Earnings IV crush"
+    direction: neutral
+    vol_view: short
+    kind: credit               # default vehicle (iron condor / iron fly); calendars are debit
+    risk: defined
+    size_factor_key: earnings_size_factor
+    gates:
+      required:
+        earnings: {in: [imminent]}
+        iv_percentile: {in: [elevated], unknown: fail}
+        earnings_move: {in: [rich], unknown: fail}
+        liquidity: {in: [ok]}
+        vix_level: {not_in: [extreme]}
+      preferred:
+        vix_ts: {in: [contango, flat]}
+        gex: {in: [positive]}
+        vvix: {in: [normal]}
+        lean: {in: [neutral]}
+      warn:
+        news: {in: [red_flag, binary]}
+        gex: {in: [negative]}
+    build: {vehicles: [iron_condor, iron_fly, calendar, double_calendar], wing_em_mult: 1.0,
+            exit: day_after_earnings}
+
+# Confidence (spec §5): weights live in config.yaml engine.weights. How each category is scored:
+confidence:
+  floor: 40
+  buckets: {low_below: 40, high_above: 70}
+  unknown_credit: 0.5          # an unknown gate input scores half

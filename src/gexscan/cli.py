@@ -5,13 +5,19 @@
   gexscan report NVDA        deep-dive on one ticker (nothing is logged)
   gexscan review             mark and check open ideas only
   gexscan journal list|take|close|stats
+  gexscan recommend          strategy engine: gated, confidence-scored ideas with rationale + exit plan
+  gexscan explain NVDA       every signal state and gate decision for one ticker
+  gexscan alerts             2x-credit stop alerts on open short premium + regime alerts (alert only)
+  gexscan backtest           synthetic replay of the strategy rules and exits (labelled SYNTHETIC)
+  gexscan capabilities       which data providers / alert sinks are usable with your .env
+  gexscan web                local website: themes -> ticker -> options scan -> visualizer, plus a strategy builder
 
-Read-only: this tool never places orders.
+Read-only: this tool never places, changes or cancels orders. It recommends and alerts; you act.
 """
 from __future__ import annotations
 
 import datetime as dt
-import logging
+import json
 import re
 import webbrowser
 from pathlib import Path
@@ -19,9 +25,11 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
-from .config import load_config, load_dotenv
+from .config import load_config, load_dotenv, stop_multiple
+from .logutil import redact, setup_logging
 from .pipeline import DataSource, review_journal, run, scan_symbol
 from .review import weekly_stats
 from .store import Store
@@ -33,13 +41,19 @@ con = Console()
 
 CONFIG = typer.Option("config.yaml", "--config", "-c", help="config file")
 STATE = typer.Option(None, "--state", help="state dir (journal database)")
+SYMBOLS = typer.Option(None, "--symbols", "-s", help="comma list overriding the watchlist")
+FIXTURES = typer.Option(None, "--fixtures", help="offline fixtures dir (tests/demos)")
+TODAY = typer.Option(None, "--today", help="override run date YYYY-MM-DD")
+VERBOSE = typer.Option(False, "--verbose", "-v")
+JSON_LOGS = typer.Option(False, "--json-logs", help="structured JSON log lines (secrets redacted)")
+LOG_FILE = typer.Option(None, "--log-file", help="also write logs here")
+OPEN = typer.Option(False, "--open", help="open the HTML page in your browser")
 
 
-def _setup(config: str, verbose: bool = False, symbols: str | None = None) -> dict:
+def _setup(config: str, verbose: bool = False, symbols: str | None = None, json_logs: bool = False,
+           log_file: str | None = None) -> dict:
     load_dotenv()
-    logging.basicConfig(level=logging.INFO if verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-    for noisy in ("yfinance", "urllib3", "matplotlib", "peewee"):
-        logging.getLogger(noisy).setLevel(logging.CRITICAL)
+    setup_logging(verbose, json_logs, log_file)
     cfg = load_config(config)
     if symbols:
         cfg["watchlist"] = [s.strip().upper() for s in symbols.split(",") if s.strip()]
@@ -47,7 +61,7 @@ def _setup(config: str, verbose: bool = False, symbols: str | None = None) -> di
 
 
 def _money(x) -> str:
-    return "–" if x is None else f"${x:+,.0f}"
+    return "–" if x is None else f"{'-' if x < 0 else '+'}${abs(x):,.0f}"
 
 
 def _print_reviews(reviews: list[dict]) -> None:
@@ -248,7 +262,7 @@ def journal_take(idea_id: int, fill: Optional[float] = typer.Option(None, help="
         upd["summary"] = re.sub(r"@ [0-9.]+ (credit|debit)", lambda m: f"@ {abs(fill):.2f} {m.group(1)} (your fill)", idea["summary"] or "")
         if fill > 0:
             upd["tp_value"] = round(fill * (1 - t["take_profit_pct"]), 2)
-            upd["stop_value"] = round(fill * (1 + t["stop_loss_credit_multiple"]), 2)
+            upd["stop_value"] = round(fill * stop_multiple(t), 2)
             upd["max_profit"] = round(fill * 100, 2)
             if idea.get("width"):
                 upd["max_loss"] = round((idea["width"] - fill) * 100, 2)
@@ -312,6 +326,258 @@ def journal_stats(days: int = typer.Option(7, help="look-back window"), config: 
     stops = s["by_status"].get("stop", 0)
     if stops >= 2:
         con.print("[yellow]Two or more stops this week. Consider trading smaller or sitting out a few days.[/yellow]")
+
+
+# ---------------------------------------------------------------------------------------------------
+# strategy engine
+
+def _html_done(path: Path, open_page: bool, out: Console | None = None) -> None:
+    """Print where the HTML page went (stderr under --json, so stdout stays clean) and optionally open it."""
+    (out or con).print(f"HTML: [link={path.resolve().as_uri()}]{escape(str(path))}[/link]")
+    if open_page:
+        webbrowser.open(path.resolve().as_uri())
+
+
+def _date(s: str | None) -> dt.date | None:
+    return dt.date.fromisoformat(s) if s else None
+
+
+def _csv(s: str | None) -> list[str] | None:
+    return [x.strip() for x in s.split(",") if x.strip()] if s else None
+
+
+def _engine(cfg, symbols, strategy, min_confidence, top, max_per_ticker, allow_undefined, direction, vol_view,
+            fixtures, today, state, no_news, theme=None, dte_min=None, dte_max=None):
+    from .engine.recommend import Filters, recommend as run_engine
+    from .engine.universe import load_universe
+
+    f = Filters(symbols=[s.upper() for s in _csv(symbols)] if symbols else None, strategies=_csv(strategy),
+                min_confidence=min_confidence, top_n=top, max_per_ticker=max_per_ticker,
+                allow_undefined_risk=allow_undefined, directions=_csv(direction), vol_view=vol_view,
+                themes=_csv(theme), dte_min=dte_min, dte_max=dte_max)
+    uni = load_universe(cfg, fixtures=bool(fixtures))
+    if f.themes:
+        bad = [t for t in f.themes if t not in uni.themes and t != "outside"]
+        if bad:
+            raise typer.BadParameter(f"unknown theme(s) {', '.join(bad)}; choose from {', '.join(uni.themes)}, outside")
+    n = len(f.symbols or (uni.symbols(f.themes) if f.themes else uni.scan_list(cfg["watchlist"])))
+    with con.status(f"Strategy engine: {n} tickers (chains, vol, events, regime, gates)..."):
+        return run_engine(None, f, cfg, Path(fixtures) if fixtures else None, _date(today),
+                          Path(state) if state else None, use_news=not no_news)
+
+
+@app.command()
+def recommend(config: str = CONFIG, symbols: Optional[str] = SYMBOLS,
+              strategy: Optional[str] = typer.Option(None, "--strategy", help="comma list, e.g. csp,iron_condor"),
+              min_confidence: Optional[float] = typer.Option(None, "--min-confidence", help="0-100 floor (default 40)"),
+              top: Optional[int] = typer.Option(None, "--top", help="max ideas"),
+              max_per_ticker: Optional[int] = typer.Option(None, "--max-per-ticker"),
+              allow_undefined: Optional[bool] = typer.Option(None, "--allow-undefined/--defined-only",
+                                                             help="opt in to UNDEFINED-RISK ideas (short strangles); flagged"),
+              direction: Optional[str] = typer.Option(None, "--direction", help="comma list: bullish,bearish,neutral"),
+              vol_view: Optional[str] = typer.Option(None, "--vol", help="short / long"),
+              theme: Optional[str] = typer.Option(None, "--theme", help="comma list of universe themes, e.g. optics,memory"),
+              dte_min: Optional[int] = typer.Option(None, "--dte-min", help="only ideas with at least this many DTE"),
+              dte_max: Optional[int] = typer.Option(None, "--dte-max", help="only ideas with at most this many DTE"),
+              as_json: bool = typer.Option(False, "--json", help="print the JSON to stdout"),
+              explain: bool = typer.Option(False, "--explain", help="every gate decision under each idea"),
+              fixtures: Optional[str] = FIXTURES, today: Optional[str] = TODAY, state: Optional[str] = STATE,
+              out: Optional[str] = typer.Option(None, "--out", help="dir for recommendations_<date>.json/.md/.html"),
+              no_news: bool = typer.Option(False, "--no-news"), open_page: bool = OPEN, verbose: bool = VERBOSE,
+              json_logs: bool = JSON_LOGS, log_file: Optional[str] = LOG_FILE):
+    """Recommend option strategies: gates -> confidence -> rationale -> exit plan. Nothing is executed."""
+    from .engine.recommend import write_recommendations
+    from .reports.brief import markdown, print_brief, to_json
+    from .reports.html import render_recommend, write_html
+
+    cfg = _setup(config, verbose, None, json_logs, log_file)
+    r = _engine(cfg, symbols, strategy, min_confidence, top, max_per_ticker, allow_undefined, direction, vol_view,
+                fixtures, today, state, no_news, theme, dte_min, dte_max)
+    od = Path(out or cfg["output"]["report_dir"])
+    j, m = write_recommendations(r, od, markdown(r, explain))
+    h = write_html(render_recommend(r, stop_mult=stop_multiple(cfg["trades"])), od / f"recommendations_{r.today}.html")
+    if as_json:
+        typer.echo(to_json(r))
+        _html_done(h, open_page, Console(stderr=True))
+        return
+    print_brief(r, con, explain)
+    con.print(f"\n[dim]Wrote {escape(str(j))} and {escape(str(m))}[/dim]")
+    _html_done(h, open_page)
+
+
+@app.command()
+def explain(ticker: str, config: str = CONFIG, strategy: Optional[str] = typer.Option(None, "--strategy"),
+            fixtures: Optional[str] = FIXTURES, today: Optional[str] = TODAY, state: Optional[str] = STATE,
+            out: Optional[str] = typer.Option(None, "--out", help="dir for explain_<TICKER>_<date>.html"),
+            no_news: bool = typer.Option(False, "--no-news"), open_page: bool = OPEN, verbose: bool = VERBOSE):
+    """Every signal state, gate decision and build note for one ticker (why an idea did or didn't make it)."""
+    from .reports.brief import print_explain
+    from .reports.html import render_explain, write_html
+
+    cfg = _setup(config, verbose)
+    sym = ticker.upper()
+    r = _engine(cfg, sym, strategy, 0, 50, 50, None, None, None, fixtures, today, state, no_news)
+    print_explain(con, r, sym)              # signal states, the ideas that passed, strategy log, gates
+    if sym in r.names and not any(c.symbol == sym for c in r.recommendations):
+        con.print(f"\n[bold]No {escape(sym)} idea passed the gates.[/bold] The gate lines above say why.")
+    h = write_html(render_explain(r, sym), Path(out or cfg["output"]["report_dir"]) / f"explain_{sym}_{r.today}.html")
+    _html_done(h, open_page)
+
+
+@app.command()
+def alerts(config: str = CONFIG, symbols: Optional[str] = SYMBOLS,
+           positions: Optional[str] = typer.Option(None, "--positions", help="positions YAML (default alerts.positions_file)"),
+           ibkr: Optional[bool] = typer.Option(None, "--ibkr/--no-ibkr", help="read positions from the IBKR gateway (GET only)"),
+           no_names: bool = typer.Option(False, "--no-names", help="skip the watchlist IV-rank / earnings checks"),
+           sink: Optional[list[str]] = typer.Option(None, "--sink", help="console / log / webhook / telegram / email (repeat)"),
+           dry_run: bool = typer.Option(False, "--dry-run", help="console only; don't remember alert state"),
+           as_json: bool = typer.Option(False, "--json", help="print the run as JSON to stdout"),
+           fixtures: Optional[str] = FIXTURES, today: Optional[str] = TODAY, state: Optional[str] = STATE,
+           out_dir: Optional[str] = typer.Option(None, "--out", help="dir for alerts_<date>.html"), open_page: bool = OPEN,
+           verbose: bool = VERBOSE, json_logs: bool = JSON_LOGS, log_file: Optional[str] = LOG_FILE):
+    """Stop alerts (cost to close >= 2x credit) on open short premium + regime alerts. Alert only: no auto-action."""
+    from .alerts import run_alerts
+    from .alerts.sinks import FOOTER
+    from .reports.html import render_alerts, write_html
+
+    cfg = _setup(config, verbose, None, json_logs, log_file)
+    out = Console(stderr=True) if as_json else con
+    with out.status("Checking positions and regime..."):
+        r = run_alerts(cfg, Path(fixtures) if fixtures else None, _date(today), Path(state) if state else None,
+                       positions, ibkr, [s.upper() for s in _csv(symbols)] if symbols else None, not no_names,
+                       sink or None, dry_run, out)
+    h = write_html(render_alerts(r), Path(out_dir or cfg["output"]["report_dir"]) / f"alerts_{r.today}.html")
+    if as_json:
+        typer.echo(redact(json.dumps(r.to_dict(), indent=2, default=str)))
+        _html_done(h, open_page, out)
+        return
+    if r.positions:
+        t = Table(title=f"Open short premium ({len(r.positions)})")
+        for c in ("Ticker", "Strategy", "Expiry", "Legs", "Credit", "Cost to close", "x credit", "Stop at", "P/L", "State", "Source"):
+            t.add_column(c)
+        for p in r.positions:
+            st = p.get("state", "")
+            sty = {"stop": "bold red", "warn": "yellow", "ok": "green"}.get(st, "dim")
+            t.add_row(p["symbol"], p.get("strategy") or "", p.get("expiry") or "", escape(p.get("legs", "")),
+                      f"{p['credit']:.2f}", f"{p['cost_to_close']:.2f}" if "cost_to_close" in p else "–",
+                      f"{p['ratio']:.2f}" if "ratio" in p else "–", f"{p['stop_at']:.2f}" if "stop_at" in p else "–",
+                      _money(p.get("pnl")), f"[{sty}]{st}[/{sty}]", escape(f"{p['source']} {p['ref']}"))
+        con.print(t)
+    else:
+        con.print("[dim]No open short-premium positions (positions.yaml, journal 'taken' ideas, IBKR if enabled).[/dim]")
+    con.print(f"{len(r.alerts)} alert(s) sent, {len(r.suppressed)} unchanged since last run (not re-sent).")
+    for k, v in r.delivered.items():
+        con.print(f"  [dim]{k}: {escape(v)}[/dim]")
+    for e in r.errors:
+        con.print(f"[dim]data issue: {escape(redact(e))}[/dim]")
+    con.print(f"[dim]{FOOTER}[/dim]")
+    _html_done(h, open_page)
+
+
+@app.command()
+def backtest(config: str = CONFIG, symbols: Optional[str] = SYMBOLS,
+             strategy: Optional[str] = typer.Option(None, "--strategy", help="comma list (csp,bull_put,bear_call,iron_condor,calendar)"),
+             years: Optional[float] = typer.Option(None, "--years"),
+             as_json: bool = typer.Option(False, "--json"), trades: bool = typer.Option(False, "--trades", help="list every trade"),
+             fixtures: Optional[str] = FIXTURES, today: Optional[str] = TODAY, state: Optional[str] = STATE,
+             out: Optional[str] = typer.Option(None, "--out", help="dir for backtest_<date>.json/.md/.html"),
+             open_page: bool = OPEN, verbose: bool = VERBOSE):
+    """SYNTHETIC backtest: BS repricing on an RV-based IV proxy with the live entry gates and exit plan."""
+    from .backtest import markdown, run_backtest
+    from .reports.html import render_backtest, write_html
+
+    cfg = _setup(config, verbose)
+    d = _date(today) or dt.date.today()
+    with con.status("Replaying entries and exits..."):
+        r = run_backtest(cfg, [s.upper() for s in _csv(symbols)] if symbols else None, _csv(strategy), years,
+                         Path(fixtures) if fixtures else None, d, Path(state) if state else None)
+    od = Path(out or cfg["output"]["report_dir"])
+    od.mkdir(parents=True, exist_ok=True)
+    (od / f"backtest_{d}.json").write_text(json.dumps(r.to_dict(), indent=2, default=str))
+    (od / f"backtest_{d}.md").write_text(markdown(r))
+    h = write_html(render_backtest(r, d), od / f"backtest_{d}.html")
+    if as_json:
+        typer.echo(json.dumps(r.to_dict(), indent=2, default=str))
+        _html_done(h, open_page, Console(stderr=True))
+        return
+    con.rule(f"Backtest {r.start} to {r.end} · {', '.join(r.symbols)}")
+    con.print(f"[bold yellow]{escape(r.label)}[/bold yellow]")
+    t = Table()
+    for c in ("Strategy", "Trades", "Win rate", "Avg P/L", "Total P/L", "Max DD", "Avg days", "Exits", "Top skips"):
+        t.add_column(c)
+    for k, s in r.stats.items():
+        ex = ", ".join(f"{a} {b}" for a, b in sorted(s.exits.items())) + (f", open {s.open}" if s.open else "")
+        sk = ", ".join(f"{a}: {b}" for a, b in sorted(s.skipped.items(), key=lambda x: -x[1])[:3])
+        t.add_row(k, str(s.n), "–" if s.win_rate is None else f"{s.win_rate:.0f}%", _money(s.avg_pnl),
+                  _money(s.total_pnl), _money(-s.max_drawdown), "–" if s.avg_days is None else f"{s.avg_days:g}",
+                  escape(ex or "–"), escape(sk or "–"))
+    con.print(t)
+    if trades:
+        tt = Table(title="Trades")
+        for c in ("Ticker", "Strategy", "Entry", "Exit", "Legs", "Net", "Exit value", "P/L", "Reason"):
+            tt.add_column(c)
+        for x in r.trades:
+            tt.add_row(x.symbol, x.strategy, x.entry, x.exit, escape(x.legs), f"{x.net:+.2f}", f"{x.exit_value:+.2f}",
+                       _money(x.pnl), x.reason)
+        con.print(tt)
+    for a in r.assumptions[1:]:
+        con.print(f"[dim]· {escape(a)}[/dim]")
+    for e in r.errors:
+        con.print(f"[dim]data issue: {escape(e)}[/dim]")
+    con.print(f"[dim]Wrote {od / f'backtest_{d}.md'} (+ .json). Synthetic estimates, not financial advice.[/dim]")
+    _html_done(h, open_page)
+
+
+@app.command()
+def capabilities(config: str = CONFIG, as_json: bool = typer.Option(False, "--json")):
+    """Which providers and alert sinks are usable with your .env. Shows key presence only, never values."""
+    from .alerts.sinks import make_sinks
+    from .backtest import optopsy_adapter
+    from .data.providers import capabilities as caps
+
+    cfg = _setup(config)
+    rows = caps()
+    sinks = {s.name: s.ready() for s in make_sinks(["console", "log", "webhook", "telegram", "email"], "alerts.log")}
+    extra = {"sinks": {k: "ready" if ok else f"off ({why})" for k, (ok, why) in sinks.items()},
+             "optopsy": "installed (AGPL-3.0, optional)" if optopsy_adapter.available() else "not installed (optional)",
+             "positions_file": cfg["alerts"].get("positions_file"), "ibkr_positions": bool(cfg["alerts"].get("use_ibkr"))}
+    if as_json:
+        typer.echo(json.dumps({"providers": rows, **extra}, indent=2))
+        return
+    t = Table(title="Data providers")
+    for c in ("Provider", "Category", "Kind", "Keys", "Status", "Notes"):
+        t.add_column(c)
+    for p in rows:
+        sty = {"ready": "green", "key missing": "yellow"}.get(p["status"], "dim")
+        t.add_row(p["provider"], p["category"], p["kind"], p["keys"], f"[{sty}]{p['status']}[/{sty}]", escape(p["notes"]))
+    con.print(t)
+    con.print("Alert sinks: " + ", ".join(f"{k} {v}" for k, v in extra["sinks"].items()))
+    con.print(f"optopsy: {extra['optopsy']} · positions file: {extra['positions_file']} · "
+              f"IBKR positions: {'on' if extra['ibkr_positions'] else 'off'}")
+    con.print("[dim]Live probe of what each key's tier returns: python scripts/probe_providers.py[/dim]")
+
+
+@app.command()
+def web(config: str = CONFIG, port: int = typer.Option(None, "--port", help="local port (default web.port, 8765)"),
+        fixtures: Optional[str] = FIXTURES, today: Optional[str] = TODAY, state: Optional[str] = STATE,
+        no_news: bool = typer.Option(False, "--no-news"), open_page: bool = OPEN, verbose: bool = VERBOSE,
+        json_logs: bool = JSON_LOGS, log_file: Optional[str] = LOG_FILE):
+    """Local website on 127.0.0.1: pick a theme, read a ticker, scan it, visualize trades, build your own strategy.
+
+    Read-only, GET-only, bound to this machine. A web scan never writes to the journal.
+    """
+    from .web.server import serve
+
+    cfg = _setup(config, verbose, None, json_logs, log_file)
+    p = int(port or cfg.get("web", {}).get("port", 8765))
+    url = f"http://127.0.0.1:{p}/"
+    mode = f"FIXTURES ({fixtures})" if fixtures else "LIVE (CBOE delayed)"
+    con.print(f"gexscan web · {mode} · [bold]{url}[/bold]  (Ctrl+C to stop)")
+    con.print("[dim]Ideas and estimates only, not financial advice. This app never places orders.[/dim]")
+    if open_page:
+        webbrowser.open(url)
+    serve(cfg, p, Path(fixtures) if fixtures else None, _date(today), Path(state) if state else None,
+          use_news=not no_news)
 
 
 if __name__ == "__main__":

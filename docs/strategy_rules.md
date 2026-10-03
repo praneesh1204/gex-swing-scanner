@@ -48,7 +48,7 @@ Status legend: ✅ adopted as default · ⚙️ configurable parameter · ❓ **
 
 | # | Rule | Source | Status |
 |---|---|---|---|
-| C1 | **Stop: exit when loss reaches 2× the credit; no rolling** | [SPEC §2] | ❓ **see below** |
+| C1 | **Stop: exit when loss reaches 2× the credit; no rolling** | [SPEC §2] | ✅ **resolved (v2.1):** the strategy-engine spec defines it as "exit at 2× credit received, i.e. when the position's loss equals the credit". That is interpretation (b): cost to close = 2× credit, everywhere. The underlying-close stop at the short strike stays for verticals |
 | C2 | Take profit at **25–50 %** of max profit; "the 50 % rule" for verticals | [SP p9, p12] | ✅ default 50 % |
 | C3 | "Exit trades halfway to expiration": if 4 weeks, take profit at 2 weeks; if not in profit at 2 weeks, "consider adjustment or roll" | [SP p11] | ❓ spec time exit is "~21 DTE or 1–2 days before expiry" |
 | C4 | Rolling is taught (roll out / up / down, ≥ 14–21 DTE), with the rule "never roll just to avoid taking a loss" | [SP p13–14] | ❌ **overridden by [SPEC]: no rolling** |
